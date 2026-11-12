@@ -79,5 +79,20 @@
       "host_only": false
     }
   },
-  "manifest_sha256": "820f73062f240f35c97a7d6f4e13a58e91becf05b03c8fc0f300351d2daafd3f"
+  "manifest_sha256": "820f73062f240f35c97a7d6f4e13a58e91becf05b03c8fc0f300351d2daafd3f",
+  "recipe_build_helpers": {
+    "cmake": {
+      "version": "4.4.3",
+      "url": "https://github.com/Kitware/CMake/releases/download/v4.4.3/cmake-4.4.3-windows-x86_64.zip",
+      "sha512": "5f8527e18bffdf5113a64238442093468fce80c8a5f99e1b5eb217e0d73796eb7a2a236ee0c522de3424cb87a1abb3153fcecdb20d8d338c8a607667c9b37c90"
+    },
+    "pkgconf": {
+      "url": "https://mirror.msys2.org/mingw/mingw64/mingw-w64-x86_64-pkgconf-1~3.0.7-1-any.pkg.tar.zst",
+      "sha512": "27a88825f334d8fe2477f193eaa30785f3b79aa03e07f5793611fe29c9b7dc552338216a4a1f24d2801a467dd453295c077fa07a9c6b83b882afd6bb3928ddec"
+    },
+    "msys2-runtime": {
+      "url": "https://mirror.msys2.org/msys/x86_64/msys2-runtime-3.6.10-4-x86_64.pkg.tar.zst",
+      "sha512": "b0380c668456dbbcbee5695181be446357b9e1765a51cdf7140f247ccb06c37e064c79b17a0d50f3faa21eb13d08f228608ceb729a87c0862742e8b6161bc281"
+    }
+  }
 }

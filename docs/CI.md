@@ -24,7 +24,10 @@ independently reproducible binaries.
 `scripts/ci/toolchain-lock.json` records the approved vcpkg revision, executable release and
 SHA-256, port revisions, and source SHA-512 hashes. The build downloads the executable to a
 file and checks its hash before running it. It does not run the upstream bootstrap script.
-Pinned vcpkg recipes verify dependency source hashes. Metrics and external binary caches are disabled.
+Pinned vcpkg recipes verify dependency source hashes. They also provision their recorded build helpers,
+including CMake 4.4.3, pkgconf 3.0.7, and the MSYS2 runtime 3.6.10-4; their hashes are in the lock record.
+The runner's existing CMake starts the project build; the recipes use their pinned helper CMake.
+Metrics and external binary caches are disabled.
 
 Tool installation is restricted to the runner's `.ci-tools/vcpkg` directory. Dependencies and
 build output are under `build-ci`. No tool or dependency installation on a local PC is authorized
@@ -40,7 +43,8 @@ Individual upstream GoogleTest cases can skip optional fixtures inside a passing
 The package must contain an x64 driver, installer, and viewer. Each binary must import only
 recognized Windows system DLLs. The driver must export only `HmdDriverFactory` and contain the
 personal-fork marker. Dependency license notices are required. Developer tools and OpenVR's
-client DLL are not included in the package.
+client DLL are not included in the package. Only OpenVR's prebuilt client dependency uses dynamic
+linkage for the test probe; the shipped targets retain static compiler runtimes.
 
 The package includes `BUILD.json`. Release assets also include the ZIP's SHA-256 checksum,
 a copy of `BUILD.json`, and the CTest XML report.

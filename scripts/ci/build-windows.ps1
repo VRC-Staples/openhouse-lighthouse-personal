@@ -52,6 +52,7 @@ Run $binary @('version', '--disable-metrics')
 $build = "$repo/build-ci"
 $triplet = 'x64-windows-static-release'
 Run python @('scripts/tests/test_package_windows.py')
+Run cmake @('-P', 'scripts/tests/check-triplet.cmake')
 Run cmake @('-S', '.', '-B', $build, '-G', 'Ninja', '-DCMAKE_BUILD_TYPE=Release',
     "-DCMAKE_TOOLCHAIN_FILE=$tools/scripts/buildsystems/vcpkg.cmake",
     "-DVCPKG_OVERLAY_TRIPLETS=$repo/cmake/triplets", "-DVCPKG_TARGET_TRIPLET=$triplet",
