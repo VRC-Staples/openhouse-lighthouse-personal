@@ -40,8 +40,12 @@ def main():
                     '-lws2_32', '-liphlpapi', '-ladvapi32',
                     '-o', str(OUT / 'personal-safety.exe')], 'compile-safety')
     run([str(OUT / 'personal-safety.exe')], 'test-safety')
-    run(compiler + ['-municode', 'apps/openhouse-installer/main.cpp',
-                    '-o', str(OUT / 'openhouse-installer.exe')], 'compile-installer')
+    shutdown = ['apps/openhouse-installer/process_shutdown.cpp', '-ladvapi32', '-luser32']
+    run(compiler + ['tests/personal/test_shutdown.cpp'] + shutdown +
+        ['-o', str(OUT / 'shutdown-tests.exe')], 'compile-shutdown')
+    run([str(OUT / 'shutdown-tests.exe')], 'test-shutdown')
+    run(compiler + ['-municode', 'apps/openhouse-installer/main.cpp'] + shutdown +
+        ['-o', str(OUT / 'openhouse-installer.exe')], 'compile-installer')
     run([str(OUT / 'openhouse-installer.exe')], 'installer-refuses-missing-arguments', 1)
     for name in ['scripts/check-personal.py', 'scripts/package-windows.py']:
         ast.parse((ROOT / name).read_text(encoding='utf-8'), filename=name)

@@ -27,11 +27,16 @@ inline void RequireStock(const std::string& bytes) {
     throw std::runtime_error("Stock driver is missing or unrecognized. Verify SteamVR files in Steam.");
 }
 
+inline std::string ReadPersonalPackage(const std::filesystem::path& package) {
+  auto bytes = lh::files::Read(package);
+  if (!DriverImage(bytes) || bytes.find(kPersonal) == std::string::npos)
+    throw std::runtime_error("Package is not the personal Lighthouse driver");
+  return bytes;
+}
+
 inline void Install(const std::filesystem::path& package, const std::filesystem::path& target,
                     const std::filesystem::path& backup) {
-  const auto incoming = lh::files::Read(package);
-  if (!DriverImage(incoming) || incoming.find(kPersonal) == std::string::npos)
-    throw std::runtime_error("Package is not the personal Lighthouse driver");
+  const auto incoming = ReadPersonalPackage(package);
   const auto current = lh::files::Read(target);
   if (current.find(kPersonal) != std::string::npos) {
     RequireStock(lh::files::Read(backup));

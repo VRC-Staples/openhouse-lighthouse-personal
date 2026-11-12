@@ -16,12 +16,19 @@ The reproducible command is `python scripts/check-personal.py`.
 - Preserve a locked destination after replacement fails. Refuse an unreadable source before backup creation.
 - Reject truncated battery and IMU packets. Exercise all 256 header values at lengths 1 through 27 against a Windows guard page.
 - Connect two sockets owned by the current Windows user and transfer a stats message through the peer authorization checks.
+- Close a cooperative hidden fixture through `WM_CLOSE` and verify process exit.
+- Keep an uncooperative fixture running after canceled or non-explicit force-close responses.
+- Terminate a fixture only after the shutdown prompt receives `FORCE`. Keep an unrelated same-name fixture running.
+- Refuse a stale process creation time and an unreadable user identity. Verify executable-path boundaries.
 - Compile the Windows installer executable and confirm that missing arguments cause refusal. No installation command runs.
 - Parse the changed Python scripts and run `git diff --check`.
 
 The DLL fixtures are inert byte strings. The tests never load them as code.
 All file mutations occur in a temporary test directory.
 The networking test opens a temporary loopback listener, then closes it.
+Shutdown tests launch only hidden copies of the test executable inside a temporary directory.
+A Windows job object contains those fixtures and terminates them if the test exits.
+No real Steam, SteamVR, or game process receives a close request or termination.
 
 ## Tests added but not run
 
@@ -42,7 +49,10 @@ The complete dependency set is not provisioned for this fork, and no dependencie
 Cross-compilation and final packaging also did not run.
 
 Before a usable release, build the driver, installer, and viewer with approved dependencies and run the complete test suite.
-Test stats access from a separate Windows account to confirm denial.
+Test stats access and process shutdown boundaries from a separate Windows account to confirm denial.
+Test shutdown refusal for the same user in a different Windows session.
+Normal shutdown and force-close were not tested against real Steam or SteamVR.
+Those applications can minimize instead of exiting, show save prompts, or restart helpers.
 Test the intended Quest Pro, Vive tracker, and Index controller setup on a recoverable installation.
 Check pairing, buttons, finger tracking, haptics, battery state, reconnects, standby, and tracking-space alignment.
 Compare tracking behavior with stock SteamVR under the same physical conditions.

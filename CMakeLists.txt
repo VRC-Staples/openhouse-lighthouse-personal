@@ -53,6 +53,7 @@ find_package(Threads REQUIRED)
 # ---- tracking: no hardware dependencies ---------------------------------------
 # ---- lh_common: what every layer shares (log levels) ---------------------------
 add_library(lh_common STATIC src/runtime/log_level.cpp src/common/net.cpp)
+target_include_directories(lh_common PRIVATE src)
 set_target_properties(lh_common PROPERTIES POSITION_INDEPENDENT_CODE ON)
 target_compile_features(lh_common PUBLIC cxx_std_20)
 target_include_directories(lh_common PUBLIC
@@ -151,8 +152,10 @@ if(LH_BUILD_USB)
     target_link_libraries(lhtool PRIVATE lh_usb lh_tracking lh)
     # The personal installer changes only the DLL and keeps its stock backup.
     if(WIN32)
-      add_executable(openhouse-installer apps/openhouse-installer/main.cpp)
+      add_executable(openhouse-installer apps/openhouse-installer/main.cpp
+        apps/openhouse-installer/process_shutdown.cpp)
       target_include_directories(openhouse-installer PRIVATE src)
+      target_link_libraries(openhouse-installer PRIVATE advapi32 user32)
       if(NOT MSVC)  # MSVC starts wmain by itself
         target_compile_options(openhouse-installer PRIVATE -municode)
         target_link_options(openhouse-installer PRIVATE -municode)
@@ -301,6 +304,13 @@ if(LH_BUILD_TESTS)
     target_link_libraries(lh_personal_safety_tests PRIVATE ws2_32 iphlpapi advapi32)
   endif()
   add_test(NAME personal_safety COMMAND lh_personal_safety_tests)
+  if(WIN32)
+    add_executable(lh_shutdown_tests tests/personal/test_shutdown.cpp
+      apps/openhouse-installer/process_shutdown.cpp)
+    target_include_directories(lh_shutdown_tests PRIVATE src apps/openhouse-installer)
+    target_link_libraries(lh_shutdown_tests PRIVATE advapi32 user32)
+    add_test(NAME personal_shutdown COMMAND lh_shutdown_tests)
+  endif()
   find_package(GTest REQUIRED)
   add_executable(lh_unit_tests
     tests/unit/test_platform.cpp

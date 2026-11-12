@@ -1,36 +1,19 @@
 // Personal Windows installer. Only the driver DLL and its retained backup are changed.
 #include <windows.h>
-#include <tlhelp32.h>
 #include <filesystem>
 #include <iostream>
 #include <stdexcept>
 #include <string>
 #include "driver_files.hpp"
+#include "shutdown_dialog.hpp"
 
 namespace {
 namespace fs = std::filesystem;
-const wchar_t* kHosts[] = {L"steam.exe", L"steamwebhelper.exe", L"vrserver.exe",
-    L"vrmonitor.exe", L"vrcompositor.exe", L"vrdashboard.exe", L"vrwebhelper.exe",
-    L"vrstartup.exe", L"vrservice.exe", L"monado-service.exe"};
-
-void RequireClosedHosts() {
-  HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
-  if (snapshot == INVALID_HANDLE_VALUE)
-    throw std::runtime_error("Cannot inspect running processes. Installation stopped.");
-  PROCESSENTRY32W entry{};
-  entry.dwSize = sizeof entry;
-  bool found = false;
-  BOOL more = Process32FirstW(snapshot, &entry);
-  while (more) {
-    for (const auto* name : kHosts) if (_wcsicmp(entry.szExeFile, name) == 0) found = true;
-    more = Process32NextW(snapshot, &entry);
-  }
-  const DWORD error = GetLastError();
-  CloseHandle(snapshot);
-  if (error != ERROR_NO_MORE_FILES)
-    throw std::runtime_error("Process enumeration failed. Installation stopped.");
-  if (found)
-    throw std::runtime_error("Close Steam, SteamVR, and VR applications before continuing.");
+void RequireReplaceable(const fs::path& target) {
+  openhouse::shutdown::Handle file(CreateFileW(target.c_str(), GENERIC_READ | GENERIC_WRITE | DELETE,
+      FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING, 0, nullptr));
+  if (file.get() == INVALID_HANDLE_VALUE)
+    throw std::runtime_error("Driver is locked or not writable. No driver files changed.");
 }
 
 struct Options {
@@ -59,10 +42,18 @@ Options Parse(int argc, wchar_t** argv) {
   return options;
 }
 
+fs::path PackagePath() {
+  wchar_t self[32768]{};
+  const DWORD size = GetModuleFileNameW(nullptr, self, DWORD(std::size(self)));
+  if (!size || size >= std::size(self)) throw std::runtime_error("Cannot locate installer package");
+  return fs::path(self).parent_path() / "driver_lighthouse.dll";
+}
+
 bool Confirm(const Options& options, const fs::path& target) {
   std::wcout << L"Personal Lighthouse tracker/controller fork. No headset support.\n"
              << L"Driver: " << target.wstring() << L"\n"
-             << L"Only this DLL changes. Its backup is retained after uninstall.\n";
+             << L"Only this DLL changes. Its backup is retained after uninstall.\n"
+             << L"Closing running applications requires separate confirmation.\n";
   if (options.yes) return true;
   std::cout << "Continue? [y/N] " << std::flush;
   std::string answer;
@@ -81,14 +72,18 @@ int Run(int argc, wchar_t** argv) {
               << "\nRetained backup: " << (fs::exists(backup) ? "yes" : "no") << "\n";
     return 0;
   }
-  RequireClosedHosts();
+  // Reject a missing or invalid source before asking anyone to close applications.
+  const auto package = options.action == L"--install" ? PackagePath() : fs::path();
+  if (options.action == L"--install") openhouse::installer::ReadPersonalPackage(package);
+  else openhouse::installer::RequireStock(lh::files::Read(backup));
   if (!Confirm(options, target)) return 0;
-  RequireClosedHosts();
+  const openhouse::shutdown::Scope scope{options.steamvr, openhouse::shutdown::RegisteredSteamDirectory()};
+  openhouse::shutdown::EnsureClosed(scope, std::cin, std::wcout);
+  if (!openhouse::shutdown::FindHosts(scope).empty())
+    throw std::runtime_error("A Steam/VR process restarted. Close it manually and retry.");
+  RequireReplaceable(target);
   if (options.action == L"--install") {
-    wchar_t self[32768]{};
-    const DWORD size = GetModuleFileNameW(nullptr, self, DWORD(std::size(self)));
-    if (!size || size >= std::size(self)) throw std::runtime_error("Cannot locate installer package");
-    openhouse::installer::Install(fs::path(self).parent_path() / "driver_lighthouse.dll", target, backup);
+    openhouse::installer::Install(package, target, backup);
   } else {
     openhouse::installer::Restore(target, backup);
   }

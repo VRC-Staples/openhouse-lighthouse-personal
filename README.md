@@ -25,7 +25,7 @@ Keep Defender and SmartScreen enabled. Do not add broad exclusions.
 - Remove the stock-headset bridge and its runtime DLL patches from the driver build.
   The driver exports only the required OpenVR entry point, `HmdDriverFactory`.
 - Disable headset tracking in the driver's session. Standalone library replay tools retain the upstream capability for tests.
-- Replace the Windows installer with a driver-only installer. It refuses to run while Steam or VR processes are open.
+- Replace the Windows installer with a driver-only installer. It offers normal closure before a separate, explicit force-close fallback.
   It does not elevate itself, edit SteamVR configuration, add startup entries, or install an update checker.
 - Keep the stock DLL backup after installation and restoration. Stage each replacement before changing the destination.
   Unknown driver states and conflicting backups stop the operation instead of deleting recovery files.
@@ -84,7 +84,8 @@ For an existing Zig 0.15.2 installation, run:
 python scripts/check-personal.py
 ```
 
-This command compiles and runs file, installer-core, packet-boundary, and local-network checks.
+This command compiles and runs file, installer-core, packet-boundary, local-network, and shutdown checks.
+Shutdown tests use hidden temporary fixture processes, not your real Steam or VR processes.
 It also compiles the installer and confirms that missing arguments cause a refusal.
 It does not run an install action or certify the full driver.
 
@@ -96,7 +97,7 @@ No signing step or independent binary-to-source reproduction is provided.
 ## Installer interface after validation
 
 These commands document the source interface. They are not a recommendation to install this unvalidated branch.
-Close Steam, SteamVR, and VR applications before an install or restore operation.
+Save your work and close VR games before an install or restore operation.
 Replace the example path with the SteamVR directory on your computer.
 
 ```text
@@ -104,6 +105,26 @@ openhouse-installer.exe --status --steamvr "D:\SteamLibrary\steamapps\common\Ste
 openhouse-installer.exe --install --steamvr "D:\SteamLibrary\steamapps\common\SteamVR"
 openhouse-installer.exe --uninstall --steamvr "D:\SteamLibrary\steamapps\common\SteamVR"
 ```
+
+### Closing running applications
+
+The installer identifies SteamVR processes inside the selected SteamVR directory.
+It also identifies Steam and its web helpers inside the Steam directory registered for your Windows account.
+It checks executable paths, Windows user identities, and the current Windows session, not process names alone.
+An unreadable process identity stops the operation. An unrelated process with the same name is not selected.
+
+1. Review the displayed process paths and IDs, then confirm the normal close request.
+2. Wait up to 15 seconds. The installer sends `WM_CLOSE` to each selected process's windows without moving focus.
+3. If processes remain, review the new list. Type `FORCE` to terminate only those processes, or press Enter to cancel.
+
+Force-close skips cleanup and can lose unsaved work. It can still trigger antivirus detection.
+Some applications minimize to the tray or have no closeable windows. A normal close request does not guarantee shutdown.
+The `--yes` option skips only the installation confirmation. It does not answer either shutdown prompt.
+End-of-input or any force-close answer other than `FORCE` cancels the operation.
+
+Before force-close, the installer rechecks the process start time, executable path, Windows user, and session.
+It waits up to five seconds for termination. A restarted process, denied access, or locked DLL stops installation.
+The installer does not request elevation, kill arbitrary games, or repeatedly terminate newly started processes.
 
 Installation saves `driver_lighthouse.dll.openhouse-personal-stock` beside the original DLL.
 Restoration keeps that backup. The installer never silently replaces a different retained backup.
