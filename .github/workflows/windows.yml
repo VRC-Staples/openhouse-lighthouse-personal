@@ -1,0 +1,71 @@
+name: Windows build and tests
+
+on:
+  push:
+    branches: [personal/lighthouse-only]
+  pull_request:
+    branches: [personal/lighthouse-only]
+  workflow_dispatch:
+    inputs:
+      draft_tag:
+        description: 'Optional unpublished draft tag, e.g. v0.1.0-personal-preview.1'
+        required: false
+        default: ''
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    if: github.event_name != 'workflow_dispatch' || inputs.draft_tag == ''
+    runs-on: windows-2022
+    timeout-minutes: 90
+    steps:
+      - name: Check out the exact public source revision
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          git init .
+          git remote add origin "https://github.com/$env:GITHUB_REPOSITORY.git"
+          git fetch --depth=1 origin $env:GITHUB_SHA
+          if ($LASTEXITCODE) { throw 'Source fetch failed' }
+          git checkout --detach FETCH_HEAD
+          if ($LASTEXITCODE -or (git rev-parse HEAD) -ne $env:GITHUB_SHA) {
+            throw 'Source revision mismatch'
+          }
+      - name: Build, test, and check the Windows package
+        shell: pwsh
+        run: ./scripts/ci/build-windows.ps1
+
+  draft:
+    if: >-
+      github.event_name == 'workflow_dispatch' && inputs.draft_tag != '' &&
+      github.repository == 'VRC-Staples/openhouse-lighthouse-personal' &&
+      github.ref == 'refs/heads/personal/lighthouse-only'
+    runs-on: windows-2022
+    timeout-minutes: 90
+    permissions:
+      contents: write
+    steps:
+      - name: Check out the exact public source revision
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          git init .
+          git remote add origin "https://github.com/$env:GITHUB_REPOSITORY.git"
+          git fetch --depth=1 origin $env:GITHUB_SHA
+          if ($LASTEXITCODE) { throw 'Source fetch failed' }
+          git checkout --detach FETCH_HEAD
+          if ($LASTEXITCODE -or (git rev-parse HEAD) -ne $env:GITHUB_SHA) {
+            throw 'Source revision mismatch'
+          }
+      - name: Build, test, and check the Windows package
+        shell: pwsh
+        run: ./scripts/ci/build-windows.ps1
+      - name: Create an unpublished draft with checked assets
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DRAFT_TAG: ${{ inputs.draft_tag }}
+        run: ./scripts/ci/publish-draft.ps1

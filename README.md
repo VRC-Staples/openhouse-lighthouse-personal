@@ -14,8 +14,8 @@ This fork does not replace that alignment software or guarantee better tracking.
 
 This branch contains experimental source changes, not a validated release.
 Do not install a build from this branch on your main VR setup yet.
-Hardware-free Windows checks pass, but the full driver build and VR hardware tests are not complete.
-There are no installer downloads or firmware releases from this fork.
+Local hardware-free Windows checks pass. Windows CI requires a full build and its hardware-free tests before creating a draft package.
+An unpublished draft is experimental, unsigned, and not hardware-validated. This fork does not release firmware.
 
 No change here certifies the software as safe or guarantees that antivirus warnings disappear.
 Keep Defender and SmartScreen enabled. Do not add broad exclusions.
@@ -62,7 +62,8 @@ Do not flash base-station firmware for this tracker/controller use case.
 
 The upstream C++ dependencies are Eigen, Ceres, nlohmann-json, hidapi, zlib, and the OpenVR headers.
 The viewer also needs GLFW and OpenGL. The full test suite needs GoogleTest.
-Provide approved, pinned dependencies before configuring CMake. The personal Windows build script does not download dependencies.
+Provide approved, pinned dependencies before configuring CMake. The local cross-build script does not download dependencies.
+The approved [Windows CI workflow](docs/CI.md) provisions pinned dependencies only on disposable GitHub runners.
 
 With those dependencies available:
 

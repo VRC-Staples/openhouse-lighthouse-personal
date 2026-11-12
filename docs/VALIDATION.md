@@ -30,9 +30,10 @@ Shutdown tests launch only hidden copies of the test executable inside a tempora
 A Windows job object contains those fixtures and terminates them if the test exits.
 No real Steam, SteamVR, or game process receives a close request or termination.
 
-## Tests added but not run
+## Full-build CI tests
 
-The following tests need the full CMake dependencies, including GoogleTest and OpenVR headers:
+The following tests need the full CMake dependencies, including GoogleTest and OpenVR headers.
+They run in Windows CI; the local Zig-only check does not run them:
 
 - Replay a captured controller and headset with headset tracking disabled. Keep the controller and omit the headset.
 - Keep the first two stats clients working while rejecting a third client.
@@ -40,15 +41,17 @@ The following tests need the full CMake dependencies, including GoogleTest and O
 - Refuse to overwrite an existing SteamVR database when reading is denied but replacement is permitted.
 
 These tests are connected to the existing runtime and OpenVR component test targets.
-Their presence does not establish that they pass.
+Their presence does not establish that they pass. A draft package must link to its successful CI run.
+The package's `BUILD.json` records the source revision, toolchain, binary hashes, and passed CTest targets.
+CTest targets can contain individual upstream cases that skip unavailable optional fixtures; inspect the CI test log for those details.
 
 ## Checks still required
 
-The full driver and viewer build did not run in this environment.
-The complete dependency set is not provisioned for this fork, and no dependencies were downloaded or installed.
-Cross-compilation and final packaging also did not run.
+The full driver and viewer build is performed by the approved Windows CI workflow, not on the local VR computer.
+A failed build, missing required CTest target, failed target, unexpected binary import, or missing license notice blocks a draft package.
+Native CI uses MSVC with static compiler runtimes. It does not validate the separate MinGW cross-build.
 
-Before a usable release, build the driver, installer, and viewer with approved dependencies and run the complete test suite.
+A passing CI run does not replace the following checks before recommending a usable release.
 Test stats access and process shutdown boundaries from a separate Windows account to confirm denial.
 Test shutdown refusal for the same user in a different Windows session.
 Normal shutdown and force-close were not tested against real Steam or SteamVR.

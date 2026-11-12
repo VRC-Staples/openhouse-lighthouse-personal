@@ -9,6 +9,7 @@ __pycache__/
 
 # Editors / local tools
 .cache/
+.ci-tools/
 .vscode/
 .idea/
 .claude/
