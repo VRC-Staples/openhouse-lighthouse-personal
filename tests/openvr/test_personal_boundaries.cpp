@@ -59,7 +59,8 @@ TEST(PersonalViewer, WrongJsonTypeDisconnectsWithoutThrowing) {
   client.Poll(0);
   SocketOwner peer{lh::net::Accept(listener.value)};
   ASSERT_NE(peer.value, lh::net::kInvalid);
-  const std::string messages = "{\"type\":\"hello\"}\n{\"type\":1}\n";
+  const std::string messages =
+      "{\"type\":\"hello\",\"name\":\"openhouse\",\"protocol\":1}\n{\"type\":1}\n";
   ASSERT_EQ(lh::net::SendSome(peer.value, messages.data(), messages.size()), messages.size());
   for (int i = 0; i < 20; ++i) {
     EXPECT_NO_THROW(client.Poll(0.01 * i));

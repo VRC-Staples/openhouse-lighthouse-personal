@@ -1,16 +1,101 @@
 #include "telemetry_client.hpp"
-
+#include <cmath>
+#include <limits>
+#include <stdexcept>
 #include <nlohmann/json.hpp>
+#include "lh/telemetry.hpp"
 
 namespace openhouse::viewer {
 namespace {
 using json = nlohmann::json;
 
+const json& List(const json& object, const char* key) {
+  static const json empty = json::array();
+  const auto it = object.find(key);
+  if (it == object.end()) return empty;
+  // More than 256 rows per collection is not useful in this personal room viewer.
+  if (!it->is_array() || it->size() > 256) throw std::invalid_argument("Invalid telemetry list");
+  return *it;
+}
+
+int Int(const json& object, const char* key, int fallback = 0) {
+  const auto it = object.find(key);
+  if (it == object.end()) return fallback;
+  if (!it->is_number_integer() || *it < std::numeric_limits<int>::min() ||
+      *it > std::numeric_limits<int>::max())
+    throw std::invalid_argument("Telemetry integer is outside its range");
+  return it->get<int>();
+}
+
 template <size_t N>
 std::array<double, N> Array(const json& j, std::array<double, N> fallback) {
-  if (!j.is_array() || j.size() != N) return fallback;
-  for (size_t i = 0; i < N; ++i) fallback[i] = j[i].get<double>();
+  if (j.is_null()) return fallback;
+  if (!j.is_array() || j.size() != N) throw std::invalid_argument("Invalid pose vector");
+  for (size_t i = 0; i < N; ++i) {
+    const double value = j[i].get<double>();
+    // A generous local-room bound prevents overflow in camera and orientation arithmetic.
+    const double limit = N == 4 ? 2.0 : 1e6;
+    if (!std::isfinite(value) || std::abs(value) > limit)
+      throw std::invalid_argument("Pose vector is outside the display range");
+    fallback[i] = value;
+  }
   return fallback;
+}
+
+Base ReadBase(const json& b) {
+  Base x;
+  x.serial = b.value("serial", "");
+  x.channel = b.value("channel", "");
+  x.mode = Int(b, "mode");
+  x.seen = b.value("seen", false);
+  x.placed = b.value("placed", false);
+  x.origin = b.value("origin", false);
+  x.locked = b.value("locked", false);
+  x.observations = Int(b, "observations");
+  x.sigma = b.value("sigma", 0.0);
+  x.learned = b.value("learned", x.locked || x.sigma <= 0.005);
+  x.faults = Int(b, "faults");
+  x.p = Array<3>(b.value("p", json()), x.p);
+  x.q = Array<4>(b.value("q", json()), x.q);
+  return x;
+}
+
+Device ReadDevice(const json& d) {
+  Device x;
+  x.serial = d.value("serial", "");
+  x.role = d.value("role", "");
+  x.model = d.value("model", "");
+  x.hand = d.value("hand", "");
+  x.state = d.value("state", "");
+  x.primary = d.value("primary", "");
+  x.connected = d.value("connected", false);
+  x.enabled = d.value("enabled", true);
+  x.charging = d.value("charging", false);
+  x.valid = d.value("valid", false);
+  if (const auto b = d.find("battery"); b != d.end() && !b->is_null()) x.battery = Int(d, "battery");
+  x.p = Array<3>(d.value("p", json()), x.p);
+  x.v = Array<3>(d.value("v", json()), x.v);
+  x.q = Array<4>(d.value("q", json()), x.q);
+  for (const auto& b : List(d, "bases")) x.bases.push_back(b.get<std::string>());
+  for (const auto& c : List(d, "coverage"))
+    x.coverage.push_back({c.value("base", ""), Int(c, "frames"), c.value("sensors", 0.0)});
+  return x;
+}
+
+State ReadState(const json& j) {
+  State s;
+  s.time = j.value("t", 0.0);
+  if (const auto r = j.find("room"); r != j.end() && r->is_object()) {
+    s.room.id = r->value("id", "");
+    s.room.settled = r->value("settled", false);
+    s.room.epoch = r->value("epoch", 0ull);
+    s.room.settleSigma = r->value("settleSigma", 0.005);
+  }
+  for (const auto& b : List(j, "bases")) s.bases.push_back(ReadBase(b));
+  for (const auto& d : List(j, "devices")) s.devices.push_back(ReadDevice(d));
+  for (const auto& r : List(j, "receivers"))
+    s.receivers.push_back({r.value("serial", ""), r.value("connected", "")});
+  return s;
 }
 }  // namespace
 
@@ -19,6 +104,9 @@ void TelemetryClient::Disconnect() {
   socket_ = net::kInvalid;
   helloed_ = haveState_ = false;
   buffer_.clear();
+  host_.clear();
+  version_.clear();
+  pid_ = 0;
   state_ = {};
 }
 
@@ -29,8 +117,9 @@ void TelemetryClient::Poll(double now) {
     socket_ = net::ConnectLoopback(port_);
     if (socket_ == net::kInvalid) return;
   }
-  char chunk[64 * 1024];
-  for (int i = 0; i < 64; ++i) {  // bounded per frame; the rest waits for the next one
+  char chunk[16 * 1024];
+  // Bound incoming work to 64 KiB per UI frame, even when a peer keeps sending.
+  for (int i = 0; i < 4; ++i) {
     const long n = net::RecvSome(socket_, chunk, sizeof chunk);
     if (n < 0) { Disconnect(); return; }
     if (n == 0) break;
@@ -45,23 +134,32 @@ void TelemetryClient::Poll(double now) {
     } catch (const json::exception&) {
       Disconnect();
       return;
+    } catch (const std::invalid_argument&) {
+      Disconnect();
+      return;
     }
   }
   buffer_.erase(0, start);
-  // An unfinished line far longer than any the driver sends: not our driver on the port (#54.3).
   if (buffer_.size() > kMaxLine) Disconnect();
 }
 
 void TelemetryClient::Handle(const std::string& line) {
-  const json j = json::parse(line, nullptr, false);
-  if (j.is_discarded() || !j.is_object()) return;
+  const json j = json::parse(line);
+  if (!j.is_object()) throw std::invalid_argument("Expected a telemetry object");
   const std::string type = j.value("type", "");
   if (type == "hello") {
-    helloed_ = true;
+    const auto protocol = j.find("protocol");
+    if (helloed_ || j.value("name", "") != "openhouse" || protocol == j.end() ||
+        !protocol->is_number_integer() || *protocol != lh::telemetry::kProtocolVersion)
+      throw std::invalid_argument("Unexpected telemetry greeting");
     host_ = j.value("host", "");
     version_ = j.value("version", "");
-    pid_ = j.value("pid", 0);
-  } else if (type == "log") {
+    pid_ = Int(j, "pid");
+    helloed_ = true;
+    return;
+  }
+  if (!helloed_) throw std::invalid_argument("Telemetry arrived before the greeting");
+  if (type == "log") {
     LogLine l;
     l.time = j.value("t", 0.0);
     lh::ParseLogLevel(j.value("level", "INFO"), &l.level);
@@ -75,56 +173,8 @@ void TelemetryClient::Handle(const std::string& line) {
       logs_.pop_front();
     }
   } else if (type == "state") {
-    State s;
-    s.time = j.value("t", 0.0);
-    if (const auto r = j.find("room"); r != j.end() && r->is_object()) {
-      s.room.id = r->value("id", "");
-      s.room.settled = r->value("settled", false);
-      s.room.epoch = r->value("epoch", 0ull);
-      s.room.settleSigma = r->value("settleSigma", 0.005);
-    }
-    for (const auto& b : j.value("bases", json::array())) {
-      Base x;
-      x.serial = b.value("serial", "");
-      x.channel = b.value("channel", "");
-      x.mode = b.value("mode", 0);
-      x.seen = b.value("seen", false);
-      x.placed = b.value("placed", false);
-      x.origin = b.value("origin", false);
-      x.locked = b.value("locked", false);
-      x.observations = b.value("observations", 0);
-      x.sigma = b.value("sigma", 0.0);
-      x.learned = b.value("learned", x.locked || x.sigma <= 0.005);
-      x.faults = b.value("faults", 0);
-      x.p = Array<3>(b.value("p", json()), x.p);
-      x.q = Array<4>(b.value("q", json()), x.q);
-      s.bases.push_back(std::move(x));
-    }
-    for (const auto& d : j.value("devices", json::array())) {
-      Device x;
-      x.serial = d.value("serial", "");
-      x.role = d.value("role", "");
-      x.model = d.value("model", "");
-      x.hand = d.value("hand", "");
-      x.state = d.value("state", "");
-      x.primary = d.value("primary", "");
-      x.connected = d.value("connected", false);
-      x.enabled = d.value("enabled", true);
-      x.charging = d.value("charging", false);
-      x.valid = d.value("valid", false);
-      if (const auto b = d.find("battery"); b != d.end() && b->is_number()) x.battery = b->get<int>();
-      x.p = Array<3>(d.value("p", json()), x.p);
-      x.v = Array<3>(d.value("v", json()), x.v);
-      x.q = Array<4>(d.value("q", json()), x.q);
-      for (const auto& b : d.value("bases", json::array())) x.bases.push_back(b.get<std::string>());
-      for (const auto& c : d.value("coverage", json::array()))
-        x.coverage.push_back({c.value("base", ""), c.value("frames", 0), c.value("sensors", 0.0)});
-      s.devices.push_back(std::move(x));
-    }
-    for (const auto& r : j.value("receivers", json::array())) s.receivers.push_back({r.value("serial", ""), r.value("connected", "")});
-    state_ = std::move(s);
+    state_ = ReadState(j);
     haveState_ = true;
   }
 }
-
 }  // namespace openhouse::viewer

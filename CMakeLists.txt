@@ -342,12 +342,14 @@ if(LH_BUILD_TESTS)
   add_test(NAME unit COMMAND lh_unit_tests)
   if(TARGET driver_lighthouse)
     add_executable(lh_openvr_component_tests tests/openvr/test_components.cpp
-      tests/openvr/test_personal_boundaries.cpp apps/openhouse-viewer/telemetry_client.cpp
+      tests/openvr/test_personal_boundaries.cpp tests/openvr/test_viewer_guards.cpp
+      apps/openhouse-viewer/telemetry_client.cpp
       src/openvr/hand_skeleton.cpp src/openvr/raw_alignment.cpp src/openvr/steam_rooms.cpp src/openvr/room_publisher.cpp src/openvr/host_frame.cpp src/openvr/telemetry_server.cpp)
     target_include_directories(lh_openvr_component_tests PRIVATE src tests
       apps/openhouse-viewer ${OPENVR_INCLUDE_DIR})
     target_compile_definitions(lh_openvr_component_tests PRIVATE LH_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
-    target_link_libraries(lh_openvr_component_tests PRIVATE lh lh_tracking Eigen3::Eigen nlohmann_json::nlohmann_json GTest::gtest_main)
+    target_link_libraries(lh_openvr_component_tests PRIVATE lh lh_tracking Eigen3::Eigen
+      nlohmann_json::nlohmann_json ZLIB::ZLIB GTest::gtest_main)
     add_test(NAME openvr_components COMMAND lh_openvr_component_tests)
     find_library(OPENVR_API_LIBRARY openvr_api)
     if(OPENVR_API_LIBRARY)

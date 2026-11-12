@@ -69,6 +69,17 @@ void InstallerRecovery(const fs::path& dir) {
 }
 
 void LockedFilePreservation(const fs::path& dir) {
+  {
+    lh::files::StagingDirectory stage(dir);
+    const auto target = dir / "new-report.zip";
+    AtomicWrite(stage.Payload(), "complete report");
+    lh::files::PublishNew(stage.Payload(), target);
+    CHECK(Read(target) == "complete report");
+    AtomicWrite(stage.Payload(), "replacement report");
+    Refuses([&] { lh::files::PublishNew(stage.Payload(), target); });
+    CHECK(Read(target) == "complete report");
+    CHECK(Read(stage.Payload()) == "replacement report");
+  }
 #ifdef _WIN32
   const auto file = dir / "locked.json";
   AtomicWrite(file, "original");

@@ -40,6 +40,10 @@ They run in Windows CI; the local Zig-only check does not run them:
 - Disconnect the viewer on an incorrectly typed JSON message without an uncaught exception.
 - Refuse to overwrite an existing SteamVR database when reading is denied but replacement is permitted.
 
+Additional viewer guard tests cover protocol greetings, bounded messages and collections,
+numeric overflow, settings validation and atomic replacement, and report ZIP publication
+without overwriting existing reports. See [viewer safeguards](VIEWER-SAFETY.md).
+
 These tests are connected to the existing runtime and OpenVR component test targets.
 Their presence does not establish that they pass. A draft package must link to its successful CI run.
 The package's `BUILD.json` records the source revision, toolchain, binary hashes, and passed CTest targets.

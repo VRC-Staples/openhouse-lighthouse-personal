@@ -14,21 +14,19 @@
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
-#include <fstream>
 #include <mutex>
-#include <nlohmann/json.hpp>
 #include <string>
 #include <thread>
 
 #include "lh/bug_report.hpp"
 #include "lh/telemetry.hpp"
 #include "log_view.hpp"
+#include "settings.hpp"
 #include "telemetry_client.hpp"
 #include "views.hpp"
 
 namespace {
 using namespace openhouse::viewer;
-using json = nlohmann::json;
 
 std::filesystem::path SettingsPath() {
 #ifdef _WIN32
@@ -40,32 +38,6 @@ std::filesystem::path SettingsPath() {
   return std::filesystem::path(home ? home : ".") / ".config" / "lh" / "viewer.json";
 #endif
 }
-
-struct Settings {
-  Detail detail = Detail::Basic;
-  void Load(LogFilter& f) {
-    std::ifstream in(SettingsPath());
-    const json j = json::parse(in, nullptr, false);
-    if (!j.is_object()) return;
-    detail = j.value("advanced", false) ? Detail::Advanced : Detail::Basic;
-    const json l = j.value("logs", json::object());
-    f.info = l.value("info", true);
-    f.warn = l.value("warn", true);
-    f.error = l.value("error", true);
-    f.debug = l.value("debug", false);
-    f.hideMulti = l.value("hideMulti", true);
-    f.hideLh2 = l.value("hideLh2", true);
-    for (const auto& h : l.value("hidden", json::array())) if (h.is_string()) f.hidden.insert(h.get<std::string>());
-  }
-  void Save(const LogFilter& f) const {
-    const json j = {{"advanced", detail == Detail::Advanced},
-                    {"logs", {{"info", f.info}, {"warn", f.warn}, {"error", f.error}, {"debug", f.debug},
-                              {"hideMulti", f.hideMulti}, {"hideLh2", f.hideLh2}, {"hidden", f.hidden}}}};
-    std::error_code ec;
-    std::filesystem::create_directories(SettingsPath().parent_path(), ec);
-    std::ofstream(SettingsPath()) << j.dump(2) << "\n";
-  }
-};
 
 // Report > Save bug report: the zip is written on its own thread (a long recording takes
 // a few seconds); the menu bar says how it went.
@@ -148,7 +120,7 @@ int main() {
                                                                    : lh::telemetry::kDefaultPort);
   LogView logs;
   Settings settings;
-  settings.Load(logs.Filter());
+  settings.Load(SettingsPath(), logs.Filter());
   if (lh::MinimumLogLevelFromEnvironment() == lh::LogLevel::Debug) logs.Filter().debug = true;  // LH_LOG_LEVEL=DEBUG
   float logShare = 0.38f;  // of the window height
   BugReport report;
@@ -249,7 +221,11 @@ int main() {
     ImGui_ImplOpenGL2_RenderDrawData(ImGui::GetDrawData());
     glfwSwapBuffers(window);
   }
-  settings.Save(logs.Filter());
+  try {
+    settings.Save(SettingsPath(), logs.Filter());
+  } catch (const std::exception& error) {
+    std::fprintf(stderr, "Viewer settings were not saved: %s\n", error.what());
+  }
   ImGui_ImplOpenGL2_Shutdown();
   ImGui_ImplGlfw_Shutdown();
   ImGui::DestroyContext();

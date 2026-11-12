@@ -36,6 +36,8 @@ The telemetry server admits at most two viewers and bounds its backlog and outpu
 The viewer disconnects on malformed message types and bounds retained log text.
 Device filenames, legacy packet lengths, and SteamVR database replacement also receive additional checks.
 See [the validation record](docs/VALIDATION.md) for tested and untested behavior.
+See [viewer safeguards and network scope](docs/VIEWER-SAFETY.md) for input limits, safe file writes,
+and the distinction between local statistics and Internet telemetry.
 
 The personal Windows package contains only the driver, installer, viewer, documentation, and license notices.
 It does not include the update checker, comparison app, firmware, or standalone diagnostic tools.

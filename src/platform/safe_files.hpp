@@ -89,6 +89,18 @@ inline void AtomicWrite(const fs::path& target, const std::string& bytes) {
 #endif
 }
 
+// Publish a completed staged file without replacing any existing destination.
+inline void PublishNew(const fs::path& staged, const fs::path& target) {
+#ifdef _WIN32
+  if (!MoveFileExW(staged.c_str(), target.c_str(), MOVEFILE_WRITE_THROUGH))
+    throw std::runtime_error("Cannot publish a new file, Windows error " +
+                             std::to_string(GetLastError()) + ": " + target.string());
+#else
+  // A hard link is atomic and refuses an existing name; staging cleanup removes its link.
+  fs::create_hard_link(staged, target);
+#endif
+}
+
 // Existing backups are never overwritten or removed, including after restoration.
 inline void BackupOnce(const fs::path& source, const fs::path& backup) {
   const std::string original = Read(source);
