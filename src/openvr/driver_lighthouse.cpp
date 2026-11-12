@@ -38,16 +38,9 @@
 #include <vector>
 
 #include "pairing_mailbox.hpp"
-#include "stock_hmd.hpp"
+
 #include "watchdog.hpp"
 
-namespace {
-#ifdef _WIN32
-constexpr const char* kStockFile = "driver_lighthouse.dll.stock";
-#else
-constexpr const char* kStockFile = "driver_lighthouse.so.stock";
-#endif
-}  // namespace
 #include "lh/session.hpp"
 #include "hand_skeleton.hpp"
 #include "runtime/mapped_input.hpp"
@@ -199,19 +192,6 @@ std::vector<std::pair<ETrackedDeviceProperty, std::string>> StatusIcons(const st
 // The process hosting the driver (vrserver, monado-service, wivrn-server, ...).
 std::string HostName();
 
-// No stock display for a lighthouse headset: LH_NO_STOCK_HMD, or WiVRn, which streams its
-// own headset (a Vive left plugged in crashed wivrn-server inside the stock driver's
-// headset setup). LH_STOCK_HMD=1 still forces it.
-bool StockHmdUnwanted(std::string* why) {
-  if (std::getenv("LH_NO_STOCK_HMD")) { if (why) *why = "LH_NO_STOCK_HMD"; return true; }
-  const char* force = std::getenv("LH_STOCK_HMD");
-  if (!(force && *force == '1') && HostName() == "wivrn-server") {
-    if (why) *why = "WiVRn streams its own headset";
-    return true;
-  }
-  return false;
-}
-
 std::string HostName() {
 #ifdef _WIN32
   char path[MAX_PATH]{};
@@ -289,14 +269,6 @@ class Device : public ITrackedDeviceServerDriver {
     active_ = false;
     id_ = k_unTrackedDeviceIndexInvalid;
   }
-  // A device the host activated through another driver (a headset from the stock driver,
-  // stock_hmd.hpp): we only publish its pose; its properties are that driver's.
-  void AttachExternal(uint32_t objectId, const std::atomic<bool>* alive) {
-    id_ = objectId;
-    container_ = VRProperties()->TrackedDeviceToPropertyContainer(objectId);
-    externalAlive_ = alive;
-    active_ = true;
-  }
   // SteamVR's idle power-off (power/turnOffControllersTimeout) calls this; the stock
   // driver powers the device off here when it can (Prop_DeviceCanPowerOff), and so do we.
   void EnterStandby() override {
@@ -313,17 +285,9 @@ class Device : public ITrackedDeviceServerDriver {
     return pose_;
   }
 
-  bool Active() const { return active_ && (!externalAlive_ || *externalAlive_); }
-  bool IsHmd() const { return info_.role == lh::DeviceRole::Hmd; }
+  bool Active() const { return active_; }
   // "left_hand" / "right_hand" for a controller, else "".
   std::string Hand() const { return info_.role == lh::DeviceRole::Controller ? info_.controllerRole : std::string(); }
-  std::string StringProperty(ETrackedDeviceProperty prop) const {
-    if (!Active()) return {};
-    char value[256] = {};
-    ETrackedPropertyError error = TrackedProp_Success;
-    VRProperties()->GetStringProperty(container_, prop, value, sizeof value, &error);
-    return error == TrackedProp_Success ? std::string(value) : std::string();
-  }
   const DeviceStatic& Info() const { return info_; }
   bool MatchesHaptic(const VREvent_t& event) const {
     return active_ && lh::openvr::MatchesHaptic(event, id_, container_, haptic_);
@@ -404,7 +368,7 @@ class Device : public ITrackedDeviceServerDriver {
     if (pose.valid) {
       held_ = p;
       haveHeld_ = true;
-    } else if (p.deviceIsConnected && g_hideLost && !IsHmd()) {
+    } else if (p.deviceIsConnected && g_hideLost) {
       // "Hide lost devices" (off by default): reported lost, as SteamVR's own driver does, so
       // the host hides it until light finds it again. The headset is still held: a lost
       // headset would show SteamVR's grey tracking-lost screen.
@@ -939,7 +903,6 @@ class Device : public ITrackedDeviceServerDriver {
   bool hadInput_ = false;
   DeviceStatic info_;
   std::atomic<bool> active_{false};
-  const std::atomic<bool>* externalAlive_ = nullptr;  // AttachExternal: the host still has it
   std::atomic<bool> powerOffRequested_{false};
   std::chrono::steady_clock::time_point lastUse_{};
   static int32_t NextHandPriority() {
@@ -993,6 +956,7 @@ class Provider : public IServerTrackedDeviceProvider {
     VR_INIT_SERVER_DRIVER_CONTEXT(context);
     context_ = context;
     lh::SessionOptions options;
+    options.trackHeadsets = false;
     if (const char* replay = std::getenv("LH_REPLAY")) options.replayPath = replay;
     if (const char* room = std::getenv("LH_ROOM_MAP")) options.roomMapPath = room;
     // SteamVR's rooms (steam_rooms.hpp, #82): under SteamVR, by default, SteamVR's rooms are
@@ -1089,65 +1053,12 @@ class Provider : public IServerTrackedDeviceProvider {
       return VRInitError_Init_HmdNotFound;
     }
     ApplyTuning(true);
-    Log("openhouse " + std::string(lh::kVersion) + ": liblh session started (" + std::string(options.replayPath.empty() ? "live USB" : "replay " + options.replayPath) +
-        "); head-mounted displays: tracked by us, displayed through the stock driver when one is present");
+    Log("openhouse-personal-lighthouse-only " + std::string(lh::kVersion) + ": liblh session started (" + std::string(options.replayPath.empty() ? "live USB" : "replay " + options.replayPath) +
+        "); personal Lighthouse tracker/controller build; no headset tracking or display support");
     Log(std::string("input components through ") +
         (ComponentInput() != VRDriverInput() ? "IVRDriverInput_005" : IVRDriverInput_Version));
-    // SteamVR's dongle pairing menu: ours owns the dongles (registered before the stock
-    // driver loads, which is kept off this mailbox).
+    // This fork owns only Lighthouse receivers, trackers, and controllers.
     if (options.replayPath.empty()) pairing_.Open(context_, [](const std::string& text) { Log(text); });
-    {
-      std::lock_guard lock(radioMutex_);
-      radioSession_ = session_.get();
-    }
-    stock_.SetRequestHandler([this](const char* request, char* response, uint32_t size) {
-      return RadioRequest(request, response, size);
-    });
-    // A headset on USB: bring up the stock driver for its display now, inside the host's
-    // device discovery window.
-    using Presence = lh::openvr::StockHmd::Presence;
-    std::string which;
-    std::vector<std::string> maybe;
-    std::string unwanted;
-    const bool noStock = StockHmdUnwanted(&unwanted);
-    Presence presence = noStock ? Presence::No : lh::openvr::StockHmd::HeadsetPresent(&which, &maybe);
-    if (noStock && unwanted != "LH_NO_STOCK_HMD") Log("lighthouse headsets aren't displayed here (" + unwanted + ")");
-    // Wired 0x2300 devices that may be headsets (Index, Beyond) are asked by their configs even
-    // when a 0x2000 one (Vive, Vive Pro) already made it a yes: with an old Vive left plugged in
-    // beside an Index, the Index was hidden from the stock driver, which then found only the
-    // Vive and no display for it (#28).
-    if (!maybe.empty() && (presence == Presence::Maybe || presence == Presence::Yes)) {
-      // Ask the device configs (role from device_class), up to 2 s: inside Monado's 3 s.
-      const bool already = presence == Presence::Yes;
-      const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(2000);
-      std::set<std::string> pending(maybe.begin(), maybe.end());
-      while (!pending.empty() && std::chrono::steady_clock::now() < deadline) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(50));
-        for (const auto& d : session_->Snapshot().devices) {
-          if (!pending.count(d.info.serial)) continue;
-          pending.erase(d.info.serial);
-          if (d.info.role == lh::DeviceRole::Hmd) {
-            presence = Presence::Yes;
-            which = already ? which + " and " + d.info.serial : d.info.serial + " (headset by its config)";
-            lh::openvr::StockHmd::AllowHeadset(d.info.serial);
-          }
-        }
-      }
-      if (presence != Presence::Yes) {
-        Log(pending.empty() ? "wired lighthouse devices are not headsets (by their configs)"
-                            : "no config from a wired lighthouse device within 2 s; not loading the stock driver now");
-        presence = Presence::No;
-      }
-    }
-    if (presence == Presence::Yes) {
-      triedStock_ = true;
-      const std::string path = lh::openvr::StockHmd::DefaultPath();
-      if (path.empty()) Log("headset " + which + " on USB, but SteamVR's own lighthouse driver wasn't found to display it (" + std::string(kStockFile) + " or SteamVR's drivers/lighthouse)");
-      else {
-        Log("headset " + which + " on USB: loading the stock driver for its display");
-        stock_.Load(path, context_, [](const std::string& text) { Log(text); });
-      }
-    }
     if (const int port = lh::telemetry::PortFromEnvironment(); port > 0) {
       std::string telemetryError;
       if (g_telemetry.Start(port, HostName(), &telemetryError)) Log(lh::LogLevel::Debug, "viewer telemetry on 127.0.0.1:" + std::to_string(port));
@@ -1180,10 +1091,6 @@ class Provider : public IServerTrackedDeviceProvider {
     if (thread_.joinable()) thread_.join();
     if (reportThread_.joinable()) reportThread_.join();  // a report being saved finishes first
     g_telemetry.Stop();
-    {
-      std::lock_guard lock(radioMutex_);  // waits for a request being answered
-      radioSession_ = nullptr;
-    }
     if (session_) session_->Stop();
     session_.reset();
     g_recorder.Close();
@@ -1200,7 +1107,6 @@ class Provider : public IServerTrackedDeviceProvider {
     { std::lock_guard lock(eventMutex_); hapticEvents_.clear(); }
     loggedHaptic_.clear();
     loggedUnrouted_ = false;
-    stock_.Cleanup();
     VR_CLEANUP_SERVER_DRIVER_CONTEXT();
   }
 
@@ -1209,55 +1115,25 @@ class Provider : public IServerTrackedDeviceProvider {
   void RunFrame() override {
     VREvent_t event;
     while (VRServerDriverHost()->PollNextEvent(&event, sizeof(event))) {
-      stock_.PushEvent(event);  // the stock driver (headset display) sees the host's events too
       if (event.eventType == VREvent_Input_HapticVibration) {
         std::lock_guard lock(eventMutex_);
         if (hapticEvents_.size() < 64) hapticEvents_.push_back(event);
       }
     }
-    // A headset is attached: bring up the stock driver for its display (host thread).
-    if (wantStock_ && !triedStock_) {
-      triedStock_ = true;
-      const std::string path = lh::openvr::StockHmd::DefaultPath();
-      std::string unwanted;
-      if (StockHmdUnwanted(&unwanted)) Log("a head-mounted display is attached; not exposed (" + unwanted + ")");
-      else if (path.empty()) Log("a head-mounted display is attached, but SteamVR's own lighthouse driver wasn't found to display it (" + std::string(kStockFile) + " or SteamVR's drivers/lighthouse)");
-      else stock_.Load(path, context_, [](const std::string& text) { Log(text); });
-    }
-    stock_.RunFrame();
     if (session_) {
-      std::string expected;
-      {
-        std::lock_guard lock(expectedMutex_);
-        expected = expectedControllers_;
-      }
       // A malformed mailbox message must not leave RunFrame: it ends vrserver (#45).
       try {
-        pairing_.Poll(*session_, expected);
+        pairing_.Poll(*session_, {});
       } catch (const std::exception& e) {
         Log(std::string("pairing: ignored a request: ") + e.what());
       }
     }
   }
 
-  // The headset's expected controllers (Prop_ExpectedControllerType_String), "" if none.
-  // Main thread only: it is the one that changes devices_ (RunFrame reads the copy,
-  // expectedControllers_; walking the map there raced Main's inserts, #45).
-  std::string ExpectedControllerType() const {
-    for (const auto& [serial, device] : devices_)
-      if (device && device->IsHmd() && device->Active()) return device->StringProperty(Prop_ExpectedControllerType_String);
-    return {};
-  }
-
-  // Only leaving standby reaches the stock driver: it powers the headset's panels back up
-  // there (the headset's own EnterStandby, through DeviceProxy, turned them off). Without
-  // it a headset that went to sleep stayed dark (#20). Its provider EnterStandby isn't
-  // forwarded: it would power off controllers it doesn't own here.
   bool ShouldBlockStandbyMode() override { return false; }
   void EnterStandby() override { Log("SteamVR entering standby"); }
   void LeaveStandby() override {
     Log("SteamVR leaving standby");
-    stock_.LeaveStandby();
   }
 
  private:
@@ -1325,17 +1201,6 @@ class Provider : public IServerTrackedDeviceProvider {
         lastSnapshot_ = now;
         snapshot_ = session_->Snapshot();
         RegisterNewDevices();
-        for (const auto& d : snapshot_.devices)
-          if (d.info.role == lh::DeviceRole::Hmd && d.info.enabled && d.info.connected) wantStock_ = true;
-        while (const auto hmd = stock_.TakeActivated()) {
-          // The stock driver's headset is up: our tracking drives its pose.
-          DeviceStatic info{hmd->serial, {}, {}, {}, {}, lh::DeviceRole::Hmd, {}};
-          auto device = std::make_unique<Device>(info);
-          device->AttachExternal(hmd->objectId, hmd->alive);
-          devices_[hmd->serial] = std::move(device);
-          stock_.OwnPose(hmd->objectId);
-          Log("head-mounted display " + hmd->serial + ": pose from our tracking");
-        }
         Eigen::Isometry3d rawFromWorld;
         uint64_t universe = 0;
         if (steamRooms_) {
@@ -1354,11 +1219,6 @@ class Provider : public IServerTrackedDeviceProvider {
         for (auto& [serial, d] : devices_) {
           d->SetRawTransform(rawFromWorld);
           d->SetUniverse(universe);
-        }
-        {
-          const std::string expected = ExpectedControllerType();
-          std::lock_guard lock(expectedMutex_);
-          expectedControllers_ = expected;
         }
         for (const auto& b : snapshot_.bases) {
           auto found = devices_.find(b.serial);
@@ -1457,41 +1317,13 @@ class Provider : public IServerTrackedDeviceProvider {
       Log("registered " + info.serial);
   }
 
-  // SteamVR's base station power management asks the headset to switch the Bluetooth
-  // receiver's radio (usb/radio_mode.hpp). That receiver is ours, so ours answers, the way
-  // the stock driver does (0x1eaa9). False: there is none, and the stock driver says so.
-  bool RadioRequest(const char* request, char* response, uint32_t size) {
-    if (!request || !response || !size) return false;
-    const bool toBluetooth = !std::strcmp(request, "set_radio_mode_ble");
-    const bool toValve = !std::strcmp(request, "set_radio_mode_valve");
-    const bool read = !std::strcmp(request, "get_radio_mode");
-    if (!toBluetooth && !toValve && !read) return false;
-    std::lock_guard lock(radioMutex_);
-    if (!radioSession_ || !radioSession_->HasBluetoothRadio()) return false;
-    const char* answer = "0";
-    if (read) {
-      if (const auto on = radioSession_->BluetoothRadioOn()) answer = *on ? "B" : "V";
-    } else if (radioSession_->SetBluetoothRadio(toBluetooth)) {
-      answer = "1";
-    }
-    std::snprintf(response, size, "%s", answer);
-    return true;
-  }
-
   std::set<std::string> loggedHaptic_;
   std::atomic<bool> loggedUnrouted_{false};
   std::mutex eventMutex_;
-  std::mutex expectedMutex_;
-  std::string expectedControllers_;  // ExpectedControllerType(), from Main for RunFrame
   std::deque<VREvent_t> hapticEvents_;
   std::unique_ptr<lh::Session> session_;
-  std::mutex radioMutex_;
-  lh::Session* radioSession_ = nullptr;  // session_ while it can answer; under radioMutex_
   IVRDriverContext* context_ = nullptr;
-  lh::openvr::StockHmd stock_;
   lh::openvr::PairingMailbox pairing_;
-  std::atomic<bool> wantStock_{false};
-  bool triedStock_ = false;
   std::thread thread_;
   std::atomic<bool> stop_{false};
   std::map<std::string, std::unique_ptr<Device>> devices_;

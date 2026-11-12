@@ -7,6 +7,7 @@
 #include <sstream>
 
 #include "platform/platform.hpp"
+#include "platform/safe_files.hpp"
 
 namespace lh::openvr {
 namespace {
@@ -63,13 +64,13 @@ bool WriteUniverse(const std::string& path, const std::string& id, const std::ve
     namespace fs = std::filesystem;
     const fs::path target = fs::u8path(path);
     json j = json::object();
-    std::string text;
-    if (ReadText(path, &text)) {
-      j = json::parse(text);  // a file we can't read whole is left alone (throws)
+    if (fs::exists(fs::symlink_status(target))) {
+      j = json::parse(lh::files::Read(target));
       if (!j.is_object()) throw std::runtime_error("not a JSON object");
       const fs::path backup = fs::u8path(path + ".openhouse-backup");
-      std::error_code ec;
-      if (!fs::exists(backup, ec)) fs::copy_file(target, backup, ec);
+      if (!fs::exists(fs::symlink_status(backup))) lh::files::BackupOnce(target, backup);
+      else if (!fs::is_regular_file(fs::symlink_status(backup)))
+        throw std::runtime_error("backup is not a regular file");
     } else if (!fs::is_directory(target.parent_path())) {
       throw std::runtime_error("no SteamVR config directory");
     }
@@ -106,14 +107,7 @@ bool WriteUniverse(const std::string& path, const std::string& id, const std::ve
     if (!replaced) universes.push_back(universe);
     if (j.contains("revision") && j.at("revision").is_number_integer()) j["revision"] = j.at("revision").get<int64_t>() + 1;
 
-    const std::string temp = path + ".openhouse-tmp";
-    {
-      std::ofstream out(fs::u8path(temp), std::ios::binary);
-      out << j.dump(3) << "\n";
-      out.close();
-      if (!out) throw std::runtime_error("write failed");
-    }
-    platform::ReplaceFile(fs::u8path(temp), target);
+    lh::files::AtomicWrite(target, j.dump(3) + "\n");
     if (error) error->clear();
     return true;
   } catch (const std::exception& e) {

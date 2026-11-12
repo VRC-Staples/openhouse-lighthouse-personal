@@ -3,6 +3,7 @@
 #ifdef _WIN32
 #include <winsock2.h>
 #include <ws2tcpip.h>
+#include "peer_user_win.hpp"
 #else
 #include <arpa/inet.h>
 #include <cerrno>
@@ -24,11 +25,14 @@ bool Started() {
   return ok;
 }
 bool WouldBlock() { return WSAGetLastError() == WSAEWOULDBLOCK; }
-void NonBlocking(Socket s) { u_long on = 1; ioctlsocket(SOCKET(s), FIONBIO, &on); }
+bool NonBlocking(Socket s) { u_long on = 1; return ioctlsocket(SOCKET(s), FIONBIO, &on) == 0; }
 #else
 bool Started() { return true; }
 bool WouldBlock() { return errno == EAGAIN || errno == EWOULDBLOCK; }
-void NonBlocking(Socket s) { fcntl(int(s), F_SETFL, fcntl(int(s), F_GETFL, 0) | O_NONBLOCK); }
+bool NonBlocking(Socket s) {
+  const int flags = fcntl(int(s), F_GETFL, 0);
+  return flags >= 0 && fcntl(int(s), F_SETFL, flags | O_NONBLOCK) == 0;
+}
 #endif
 
 sockaddr_in Loopback(int port) {
@@ -49,9 +53,15 @@ Socket ListenLoopback(int port, std::string* error) {
   if (!Started()) { if (error) *error = "sockets unavailable"; return kInvalid; }
   const Socket s = Socket(socket(AF_INET, SOCK_STREAM, 0));
   if (s == kInvalid) { if (error) *error = "socket() failed"; return kInvalid; }
-#ifndef _WIN32
   int on = 1;
-  setsockopt(int(s), SOL_SOCKET, SO_REUSEADDR, &on, sizeof on);  // a restart doesn't wait for TIME_WAIT
+#ifdef _WIN32
+  if (setsockopt(SOCKET(s), SOL_SOCKET, SO_EXCLUSIVEADDRUSE,
+                 reinterpret_cast<const char*>(&on), sizeof on) != 0) {
+    Close(s);
+    return kInvalid;
+  }
+#else
+  setsockopt(int(s), SOL_SOCKET, SO_REUSEADDR, &on, sizeof on);
 #endif
   const sockaddr_in a = Loopback(port);
   if (bind(s, reinterpret_cast<const sockaddr*>(&a), sizeof a) != 0 || listen(s, 4) != 0) {
@@ -59,14 +69,17 @@ Socket ListenLoopback(int port, std::string* error) {
     Close(s);
     return kInvalid;
   }
-  NonBlocking(s);
+  if (!NonBlocking(s)) { Close(s); return kInvalid; }
   return s;
 }
 
 Socket Accept(Socket listener) {
   const Socket s = Socket(accept(listener, nullptr, nullptr));
   if (s == kInvalid) return kInvalid;
-  NonBlocking(s);
+#ifdef _WIN32
+  if (!SameUserPeer(SOCKET(s))) { Close(s); return kInvalid; }
+#endif
+  if (!NonBlocking(s)) { Close(s); return kInvalid; }
   NoDelay(s);
   return s;
 }
@@ -77,7 +90,10 @@ Socket ConnectLoopback(int port) {
   if (s == kInvalid) return kInvalid;
   const sockaddr_in a = Loopback(port);
   if (connect(s, reinterpret_cast<const sockaddr*>(&a), sizeof a) != 0) { Close(s); return kInvalid; }
-  NonBlocking(s);
+#ifdef _WIN32
+  if (!SameUserPeer(SOCKET(s))) { Close(s); return kInvalid; }
+#endif
+  if (!NonBlocking(s)) { Close(s); return kInvalid; }
   NoDelay(s);
   return s;
 }

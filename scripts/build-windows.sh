@@ -6,16 +6,21 @@ repo=$(cd "$(dirname "$0")/.." && pwd)
 # the pinned baseline). Override with LH_VCPKG_ROOT.
 root=${LH_VCPKG_ROOT:-${XDG_CACHE_HOME:-$HOME/.cache}/openhouse/vcpkg}
 command -v x86_64-w64-mingw32-g++ >/dev/null || { echo 'Install MinGW-w64 first' >&2; exit 1; }
-if [[ ! -f "$root/scripts/buildsystems/vcpkg.cmake" ]]; then
-  git clone https://github.com/microsoft/vcpkg.git "$root"
-fi
-# Use this checkout's own vcpkg: a system vcpkg resolves the pinned baseline from
-# its own registry checkout instead.
-[[ -x "$root/vcpkg" ]] || "$root/bootstrap-vcpkg.sh" -disableMetrics
+# No automatic clone or bootstrap. Provision this exact tool revision separately.
+expected=a5f736224e85b32e25a8ffc52562333180396642
+[[ -x "$root/vcpkg" && -f "$root/scripts/buildsystems/vcpkg.cmake" ]] || {
+  echo 'Set LH_VCPKG_ROOT to an approved, preinstalled vcpkg checkout.' >&2; exit 1;
+}
+[[ $(git -C "$root" rev-parse HEAD) == "$expected" ]] || {
+  echo "vcpkg tooling must be at $expected" >&2; exit 1;
+}
+[[ -z $(git -C "$root" status --porcelain) ]] || {
+  echo 'vcpkg tooling checkout must be clean.' >&2; exit 1;
+}
 vcpkg="$root/vcpkg"
 export VCPKG_ROOT="$root" VCPKG_MAX_CONCURRENCY="${VCPKG_MAX_CONCURRENCY:-16}"
 triplet=x64-mingw-static-release
-"$vcpkg" install --x-manifest-root="$repo" --x-install-root="$root/installed" \
+"$vcpkg" install --no-downloads --x-manifest-root="$repo" --x-install-root="$root/installed" \
   --overlay-triplets="$repo/cmake/triplets" --triplet=$triplet --x-feature=tests --x-feature=viewer
 cmake -S "$repo" -B "$repo/build-win64" -G Ninja \
   -DCMAKE_TOOLCHAIN_FILE="$root/scripts/buildsystems/vcpkg.cmake" \

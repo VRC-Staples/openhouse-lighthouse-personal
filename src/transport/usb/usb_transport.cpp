@@ -1,6 +1,7 @@
 #include <cstdarg>
 #include <array>
 #include "usb_transport.hpp"
+#include "platform/safe_files.hpp"
 
 #include <mutex>
 #include "device_config.hpp"
@@ -154,6 +155,7 @@ UsbTransport::UsbTransport(IInputSink* sink, UsbTransportOptions opts)
 UsbTransport::~UsbTransport() { Stop(); }
 
 std::string UsbTransport::LoadSteamConfig(const std::string& dir, const std::string& serial) {
+  if (!lh::files::SafeDeviceName(serial)) return {};
   std::string lower = serial;
   std::transform(lower.begin(), lower.end(), lower.begin(), [](unsigned char c) { return std::tolower(c); });
   std::ifstream f(dir + "/" + lower + "/config.json");

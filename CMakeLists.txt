@@ -59,7 +59,7 @@ target_include_directories(lh_common PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
 if(WIN32)
-  target_link_libraries(lh_common PUBLIC ws2_32)
+  target_link_libraries(lh_common PUBLIC ws2_32 iphlpapi advapi32)
 endif()
 
 # ---- lh_report: the bug report zip (driver and openhouse-viewer) ----------------
@@ -147,24 +147,16 @@ if(LH_BUILD_USB)
 
   if(LH_BUILD_TOOLS)
     add_executable(lhtool apps/lhtool/main.cpp)
+    target_include_directories(lhtool PRIVATE src)
     target_link_libraries(lhtool PRIVATE lh_usb lh_tracking lh)
-    # Started by SteamVR each session: warns when an update replaced our driver.
+    # The personal installer changes only the DLL and keeps its stock backup.
     if(WIN32)
-      # Replaces the .bat + PowerShell installer (Defender flagged that pattern).
       add_executable(openhouse-installer apps/openhouse-installer/main.cpp)
-      target_link_libraries(openhouse-installer PRIVATE nlohmann_json::nlohmann_json)
+      target_include_directories(openhouse-installer PRIVATE src)
       if(NOT MSVC)  # MSVC starts wmain by itself
         target_compile_options(openhouse-installer PRIVATE -municode)
         target_link_options(openhouse-installer PRIVATE -municode)
       endif()
-    endif()
-    add_executable(openhouse-check WIN32 apps/openhouse-check/main.cpp)
-    target_include_directories(openhouse-check PRIVATE include)
-    if(WIN32)
-      target_link_libraries(openhouse-check PRIVATE winhttp)
-    endif()
-    if(MSVC)
-      target_link_options(openhouse-check PRIVATE /ENTRY:mainCRTStartup)  # a GUI app with main()
     endif()
     add_executable(lhcapture apps/lhcapture/main.cpp)
     target_include_directories(lhcapture PRIVATE src)
@@ -219,10 +211,9 @@ endif()
 option(LH_BUILD_OPENVR_DRIVER "Build the drop-in driver_lighthouse.so" ON)
 find_path(OPENVR_INCLUDE_DIR openvr_driver.h PATH_SUFFIXES openvr)
 if(LH_BUILD_OPENVR_DRIVER AND LH_BUILD_USB AND OPENVR_INCLUDE_DIR)
-  add_library(driver_lighthouse MODULE src/openvr/driver_lighthouse.cpp src/openvr/hand_skeleton.cpp src/openvr/raw_alignment.cpp src/openvr/steam_rooms.cpp src/openvr/room_publisher.cpp src/openvr/host_frame.cpp src/openvr/stock_hmd.cpp src/openvr/pairing_mailbox.cpp src/openvr/telemetry_server.cpp src/openvr/watchdog.cpp $<TARGET_OBJECTS:lh_runtime>)
+  add_library(driver_lighthouse MODULE src/openvr/driver_lighthouse.cpp src/openvr/hand_skeleton.cpp src/openvr/raw_alignment.cpp src/openvr/steam_rooms.cpp src/openvr/room_publisher.cpp src/openvr/host_frame.cpp src/openvr/pairing_mailbox.cpp src/openvr/telemetry_server.cpp src/openvr/watchdog.cpp $<TARGET_OBJECTS:lh_runtime>)
   if(WIN32)
-    target_link_libraries(driver_lighthouse PRIVATE setupapi hid)  # stock_hmd: hiding devices from the stock DLL
-    # HmdDriverFactory and our hidapi, for drivers that hook HID access (the .def says why).
+    # Only the OpenVR entry point is exposed; no stock-headset bridge is linked.
     target_sources(driver_lighthouse PRIVATE src/openvr/driver_lighthouse.def)
     set(LH_OPENVR_PLATFORM win64)
   elseif(APPLE)
@@ -294,22 +285,22 @@ if(LH_BUILD_VIEWER)
     target_include_directories(openhouse-viewer PRIVATE src)
     target_link_libraries(openhouse-viewer PRIVATE lh_common lh_report lh_imgui nlohmann_json::nlohmann_json)
     install(TARGETS openhouse-viewer RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
-    # openhouse-compare: openhouse and SteamVR's own driver tracking side by side
-    if(OPENVR_INCLUDE_DIR AND LH_BUILD_USB)
-      add_executable(openhouse-compare apps/openhouse-compare/main.cpp apps/openhouse-compare/stock_host.cpp)
-      target_include_directories(openhouse-compare PRIVATE src ${OPENVR_INCLUDE_DIR})
-      target_link_libraries(openhouse-compare PRIVATE lh lh_imgui Eigen3::Eigen nlohmann_json::nlohmann_json ${CMAKE_DL_LIBS})
-      install(TARGETS openhouse-compare RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
-    endif()
   else()
     message(WARNING "LH_BUILD_VIEWER is on, but ${LH_VIEWER_MISSING} wasn't found: lhviz, openhouse-viewer "
-                    "and openhouse-compare are not built. Install it, or configure with -DLH_BUILD_VIEWER=OFF.")
+                    "are not built. Install it, or configure with -DLH_BUILD_VIEWER=OFF.")
   endif()
 endif()
 
 # ---- tests --------------------------------------------------------------------
 if(LH_BUILD_TESTS)
   enable_testing()
+  add_executable(lh_personal_safety_tests tests/personal/test_safety.cpp
+    src/transport/usb/wireless_decoder.cpp src/common/net.cpp)
+  target_include_directories(lh_personal_safety_tests PRIVATE src apps/openhouse-installer)
+  if(WIN32)
+    target_link_libraries(lh_personal_safety_tests PRIVATE ws2_32 iphlpapi advapi32)
+  endif()
+  add_test(NAME personal_safety COMMAND lh_personal_safety_tests)
   find_package(GTest REQUIRED)
   add_executable(lh_unit_tests
     tests/unit/test_platform.cpp
@@ -340,8 +331,11 @@ if(LH_BUILD_TESTS)
   endif()
   add_test(NAME unit COMMAND lh_unit_tests)
   if(TARGET driver_lighthouse)
-    add_executable(lh_openvr_component_tests tests/openvr/test_components.cpp src/openvr/hand_skeleton.cpp src/openvr/raw_alignment.cpp src/openvr/steam_rooms.cpp src/openvr/room_publisher.cpp src/openvr/host_frame.cpp src/openvr/telemetry_server.cpp)
-    target_include_directories(lh_openvr_component_tests PRIVATE src tests ${OPENVR_INCLUDE_DIR})
+    add_executable(lh_openvr_component_tests tests/openvr/test_components.cpp
+      tests/openvr/test_personal_boundaries.cpp apps/openhouse-viewer/telemetry_client.cpp
+      src/openvr/hand_skeleton.cpp src/openvr/raw_alignment.cpp src/openvr/steam_rooms.cpp src/openvr/room_publisher.cpp src/openvr/host_frame.cpp src/openvr/telemetry_server.cpp)
+    target_include_directories(lh_openvr_component_tests PRIVATE src tests
+      apps/openhouse-viewer ${OPENVR_INCLUDE_DIR})
     target_compile_definitions(lh_openvr_component_tests PRIVATE LH_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
     target_link_libraries(lh_openvr_component_tests PRIVATE lh lh_tracking Eigen3::Eigen nlohmann_json::nlohmann_json GTest::gtest_main)
     add_test(NAME openvr_components COMMAND lh_openvr_component_tests)
@@ -358,7 +352,7 @@ if(LH_BUILD_TESTS)
     add_test(NAME openvr_driver COMMAND lh_openvr_host_test $<TARGET_FILE:driver_lighthouse>
       ${CMAKE_SOURCE_DIR}/tests/data/captures/session-20261016-142931Z-147083/input.lhraw 14)
   endif()
-  add_executable(lh_runtime_tests tests/runtime/test_runtime.cpp)
+  add_executable(lh_runtime_tests tests/runtime/test_runtime.cpp tests/runtime/test_personal_profile.cpp)
   target_include_directories(lh_runtime_tests PRIVATE src tests)
   target_compile_definitions(lh_runtime_tests PRIVATE LH_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
   if(LH_BUILD_USB)
@@ -409,9 +403,7 @@ foreach(entry
     "driver_lighthouse|openhouse SteamVR lighthouse driver"
     "lhtool|openhouse replay and diagnostics tool"
     "lhcapture|openhouse device recorder"
-    "openhouse-check|openhouse update check"
     "openhouse-viewer|openhouse viewer"
-    "openhouse-compare|openhouse and SteamVR driver comparison"
     "lhviz|openhouse developer viewer"
     "openhouse-installer|openhouse driver installer")
   string(REPLACE "|" ";" parts "${entry}")

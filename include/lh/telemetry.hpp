@@ -1,7 +1,7 @@
 // The driver's live telemetry: what the viewer (openhouse-viewer) shows.
 //
 // The driver listens on 127.0.0.1 (never other hosts) and streams newline-delimited
-// JSON to every client. On connect a client gets {"type":"hello"} and the recent log
+// JSON to at most two clients (same Windows user only on Windows). On connect a client gets {"type":"hello"} and the recent log
 // backlog; then {"type":"state"} about 20 times a second and {"type":"log"} for every
 // message, at every level (the client decides what to show). The protocol only adds
 // fields; clients ignore what they don't know.

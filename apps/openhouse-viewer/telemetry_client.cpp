@@ -36,12 +36,20 @@ void TelemetryClient::Poll(double now) {
     if (n == 0) break;
     buffer_.append(chunk, size_t(n));
   }
+  constexpr size_t kMaxLine = 256u << 10;
   size_t start = 0;
-  for (size_t nl; (nl = buffer_.find('\n', start)) != std::string::npos; start = nl + 1)
-    Handle(buffer_.substr(start, nl - start));
+  for (size_t nl; (nl = buffer_.find('\n', start)) != std::string::npos; start = nl + 1) {
+    if (nl - start > kMaxLine) { Disconnect(); return; }
+    try {
+      Handle(buffer_.substr(start, nl - start));
+    } catch (const json::exception&) {
+      Disconnect();
+      return;
+    }
+  }
   buffer_.erase(0, start);
   // An unfinished line far longer than any the driver sends: not our driver on the port (#54.3).
-  if (buffer_.size() > (16u << 20)) Disconnect();
+  if (buffer_.size() > kMaxLine) Disconnect();
 }
 
 void TelemetryClient::Handle(const std::string& line) {
@@ -59,9 +67,13 @@ void TelemetryClient::Handle(const std::string& line) {
     lh::ParseLogLevel(j.value("level", "INFO"), &l.level);
     l.serial = j.value("serial", "");
     l.text = j.value("text", "");
+    logBytes_ += l.text.size() + l.serial.size();
     logs_.push_back(std::move(l));
     ++received_;
-    while (logs_.size() > kMaxLogs) logs_.pop_front();
+    while (logs_.size() > kMaxLogs || logBytes_ > kMaxLogBytes) {
+      logBytes_ -= logs_.front().text.size() + logs_.front().serial.size();
+      logs_.pop_front();
+    }
   } else if (type == "state") {
     State s;
     s.time = j.value("t", 0.0);

@@ -210,6 +210,8 @@ struct SessionOptions {
   // Input: a .lhraw capture (replay) or, when empty, live USB devices.
   std::string replayPath;
   bool replayRealtime = true;   // pace replay by recorded host time
+  // The personal OpenVR driver always disables this; standalone replay tools retain it.
+  bool trackHeadsets = true;
   // Replay window, in seconds from the capture's first report (end <= 0: to the end).
   // Reports before the window are skipped, so devices start fresh at its start.
   double replayFrom = 0, replayTo = 0;

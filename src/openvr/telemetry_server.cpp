@@ -1,6 +1,7 @@
 #include "telemetry_server.hpp"
 
 #include <chrono>
+#include <algorithm>
 #include <nlohmann/json.hpp>
 
 #include "lh/telemetry.hpp"
@@ -81,21 +82,26 @@ void TelemetryServer::Stop() {
 }
 
 void TelemetryServer::Broadcast(const std::string& line) {
+  if (line.size() > kMaxLine) return;
   for (auto& c : clients_) {
-    if (c.out.size() > kMaxQueued) continue;  // dropped on the next write pass
+    if (c.out.size() > kMaxQueued) continue;
     c.out += line;
   }
   if (!clients_.empty()) wake_.notify_all();
 }
 
 void TelemetryServer::Log(double time, LogLevel level, const std::string& serial, const std::string& text) {
-  if (!thread_.joinable()) return;
+  if (!thread_.joinable() || serial.size() + text.size() > kMaxLine / 8) return;
   const std::string line =
       json{{"type", "log"}, {"t", time}, {"level", LogLevelName(level)}, {"serial", serial}, {"text", text}}.dump(
           -1, ' ', false, json::error_handler_t::replace) + "\n";
   std::lock_guard lock(mutex_);
   backlog_.push_back(line);
-  while (backlog_.size() > kBacklog) backlog_.pop_front();
+  backlogBytes_ += line.size();
+  while (backlog_.size() > kBacklog || backlogBytes_ > kMaxQueued) {
+    backlogBytes_ -= backlog_.front().size();
+    backlog_.pop_front();
+  }
   Broadcast(line);
 }
 
@@ -159,29 +165,34 @@ void TelemetryServer::PublishState(double time, const SessionSnapshot& snapshot,
 
 void TelemetryServer::Main() {
   while (!stop_) {
-    {
-      std::unique_lock lock(mutex_);
-      for (net::Socket s; (s = net::Accept(listener_)) != net::kInvalid;) {
-        Client c{s, json{{"type", "hello"}, {"protocol", telemetry::kProtocolVersion}, {"name", "openhouse"}, {"version", lh::kVersion}, {"host", host_},
-                         {"pid", int(LH_GETPID())}}.dump() + "\n"};
-        for (const auto& line : backlog_) c.out += line;
+    // Authorize at most one new peer per pass, outside the producer lock.
+    const net::Socket incoming = net::Accept(listener_);
+    std::unique_lock lock(mutex_);
+    if (incoming != net::kInvalid) {
+      if (clients_.size() >= kMaxClients) net::Close(incoming);
+      else {
+        Client c{incoming, json{{"type", "hello"}, {"protocol", telemetry::kProtocolVersion},
+            {"name", "openhouse"}, {"version", lh::kVersion}, {"host", host_},
+            {"pid", int(LH_GETPID())}}.dump() + "\n"};
+        for (const auto& line : backlog_)
+          if (c.out.size() + line.size() <= kMaxQueued) c.out += line;
         clients_.push_back(std::move(c));
       }
-      for (auto it = clients_.begin(); it != clients_.end();) {
-        bool drop = it->out.size() > kMaxQueued;
-        while (!drop && !it->out.empty()) {
-          const long n = net::SendSome(it->socket, it->out.data(), it->out.size());
-          if (n < 0) drop = true;
-          else if (n == 0) break;
-          else it->out.erase(0, size_t(n));
-        }
-        char sink[256];  // clients send nothing; this notices a closed one
-        if (!drop && net::RecvSome(it->socket, sink, sizeof sink) < 0) drop = true;
-        if (drop) { net::Close(it->socket); it = clients_.erase(it); }
-        else ++it;
-      }
-      wake_.wait_for(lock, std::chrono::milliseconds(20));
     }
+    for (auto it = clients_.begin(); it != clients_.end();) {
+      bool drop = it->out.size() > kMaxQueued;
+      if (!drop && !it->out.empty()) {
+        const long n = net::SendSome(it->socket, it->out.data(),
+                                     std::min(it->out.size(), kSendBudget));
+        if (n < 0) drop = true;
+        else if (n > 0) it->out.erase(0, size_t(n));
+      }
+      char sink[256];
+      if (!drop && net::RecvSome(it->socket, sink, sizeof sink) < 0) drop = true;
+      if (drop) { net::Close(it->socket); it = clients_.erase(it); }
+      else ++it;
+    }
+    wake_.wait_for(lock, std::chrono::milliseconds(20));
   }
 }
 

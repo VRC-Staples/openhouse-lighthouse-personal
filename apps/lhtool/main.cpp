@@ -22,6 +22,7 @@
 #include "lh/tracker.hpp"
 #include "raw_capture.hpp"
 #include "usb_transport.hpp"
+#include "platform/safe_files.hpp"
 
 namespace {
 
@@ -267,10 +268,17 @@ int ConfigsCommand(int argc, char** argv) {
   std::lock_guard lock(sink.mutex);
   int written = 0;
   for (const auto& [serial, config] : sink.configs) {
+    if (!lh::files::SafeDeviceName(serial)) {
+      fprintf(stderr, "lhtool: skipped a device with an unsafe serial filename\n");
+      continue;
+    }
     const auto path = dir / (serial + ".json");
-    std::ofstream out(path, std::ios::binary | std::ios::trunc);
-    out << config;
-    if (!out) { fprintf(stderr, "lhtool: cannot write %s\n", path.string().c_str()); continue; }
+    try {
+      lh::files::AtomicWrite(path, config);
+    } catch (const std::exception& error) {
+      fprintf(stderr, "lhtool: %s\n", error.what());
+      continue;
+    }
     printf("%s\n", path.string().c_str());
     ++written;
   }

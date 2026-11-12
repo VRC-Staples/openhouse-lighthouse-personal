@@ -13,13 +13,15 @@ import sys
 repo = Path(__file__).resolve().parent.parent
 build = Path(sys.argv[1]).resolve()
 prefix = Path(sys.argv[2]).resolve()
-out = repo / 'dist/openhouse-windows-x64'
+out = repo / 'dist/openhouse-lighthouse-personal-windows-x64'
+if subprocess.check_output(['git', '-C', str(repo), 'status', '--porcelain'], text=True).strip():
+    sys.exit('Refusing a release package from a dirty source tree; commit reviewed changes first.')
 shutil.rmtree(out, ignore_errors=True)
 (out / 'apps').mkdir(parents=True)
 files = {build / 'openvr/lighthouse/bin/win64/driver_lighthouse.dll': out / 'driver_lighthouse.dll',
          build / 'openhouse-installer.exe': out / 'openhouse-installer.exe'}
-files.update({build / name: out / 'apps' / name for name in ['liblh.dll', 'openhouse-viewer.exe', 'openhouse-compare.exe', 'lhviz.exe', 'lhtool.exe', 'lhcapture.exe', 'openhouse-check.exe']})
-system = {'advapi32.dll', 'winhttp.dll', 'kernel32.dll', 'shlwapi.dll', 'user32.dll', 'gdi32.dll',
+files[build / 'openhouse-viewer.exe'] = out / 'apps/openhouse-viewer.exe'
+system = {'advapi32.dll', 'iphlpapi.dll', 'kernel32.dll', 'shlwapi.dll', 'user32.dll', 'gdi32.dll',
           'shell32.dll', 'winmm.dll', 'ole32.dll', 'comdlg32.dll', 'msvcrt.dll',
           'ucrtbase.dll', 'ntdll.dll', 'imm32.dll', 'version.dll', 'oleaut32.dll', 'setupapi.dll', 'opengl32.dll', 'hid.dll', 'ws2_32.dll'}
 artifacts = []
@@ -51,15 +53,16 @@ for package in ['mingw-w64-crt', 'mingw-w64-headers', 'mingw-w64-winpthreads', '
 gpl = Path('/usr/share/licenses/spdx/GPL-3.0-only.txt')
 if gpl.is_file():
     shutil.copy2(gpl, licenses / 'GCC-GPL-3.0.txt')
-shutil.copy2(repo / 'packaging/settingsschema.vrsettings', out / 'settingsschema.vrsettings')
+shutil.copy2(repo / 'README.md', out / 'README.md')
 (out / 'BUILD.json').write_text(json.dumps({
     'source_commit': subprocess.check_output(['git', '-C', str(repo), 'rev-parse', 'HEAD'], text=True).strip(),
-    'source_dirty': bool(subprocess.check_output(['git', '-C', str(repo), 'diff', '--name-only'], text=True).strip()),
+    'source_dirty': False,
+    'profile': 'personal-lighthouse-trackers-and-controllers-no-headset',
     'compiler': subprocess.check_output(['x86_64-w64-mingw32-g++', '-dumpfullversion'], text=True).strip(),
     'vcpkg_baseline': json.loads((repo / 'vcpkg.json').read_text())['builtin-baseline'],
     'artifacts': artifacts,
 }, indent=2) + '\n')
-archive = shutil.make_archive(str(repo / 'dist/openhouse-windows-x64'), 'zip', out.parent, out.name)
+archive = shutil.make_archive(str(out), 'zip', out.parent, out.name)
 print(f'Packaged {archive}')
 for item in artifacts:
     print(f"  {item['file']}: {(out / item['file']).stat().st_size / 1048576:.1f} MiB")

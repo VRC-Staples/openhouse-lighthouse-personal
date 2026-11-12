@@ -1,5 +1,4 @@
-// SteamVR's dongle pairing menu, answered by our driver (which owns the dongles; the
-// stock driver loaded for a headset never sees them, stock_hmd.hpp).
+// SteamVR's dongle pairing menu, answered by our tracker/controller driver.
 //
 // SteamVR talks to the lighthouse driver through the private IVRMailbox_002 interface:
 // a mailbox named "lighthouse_pairing" receives JSON requests and the reply goes to the

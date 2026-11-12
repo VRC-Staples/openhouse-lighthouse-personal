@@ -96,6 +96,7 @@ bool LegacyDecoder::DecodeLightcap(const uint8_t* p, int n, WirelessPacket* out)
 bool LegacyDecoder::Decode(uint8_t msb, const uint8_t* p, int n, WirelessPacket* out) const {
   // 0x3fdec0
   out->Clear();
+  if (!p || n < 1) return false;
   const uint8_t* end = p + n;
   const uint8_t* q = p + 1;
   if (end == q) return true;
@@ -105,16 +106,21 @@ bool LegacyDecoder::Decode(uint8_t msb, const uint8_t* p, int n, WirelessPacket*
     if ((b1 & 1) == 0) {
       q = p + 2;
     } else {
+      if (n < 3) return false;
       out->hasBattery = true;
       out->battery = p[2];
       q = p + 3;
     }
     if (b1 & 2) {
+      if (q == end) return false;
       out->versionChange = true;
       out->newVersion = *q;
       q++;
     }
-    q += (b1 & 4) != 0;
+    if (b1 & 4) {
+      if (q == end) return false;
+      ++q;
+    }
     if (q == end) return true;
   }
   const uint8_t b = *q;
@@ -123,22 +129,26 @@ bool LegacyDecoder::Decode(uint8_t msb, const uint8_t* p, int n, WirelessPacket*
   bool imu = false;
   if (t == 0x1e || t == 0x1f) {  // input event (0x1f: followed by IMU)
     if ((b & 7) == 0) {
+      if (end - q < 9) return false;
       out->hasInput8 = true;
       out->input8 = Rd<uint64_t>(q + 1);
       r = q + 9;
     } else {
       r = q + 1;
       if (b & 1) {
+        if (end - q < 2) return false;
         out->hasButtons = true;
         out->buttons = q[1];
         r = q + 2;
       }
       if (b & 4) {
+        if (r == end) return false;
         out->hasTrigger = true;
         out->trigger = *r;
         r++;
       }
       if (b & 2) {
+        if (end - r < 4) return false;
         out->hasTouchpad = true;
         out->touchpad = Rd<uint32_t>(r);
         r += 4;
@@ -152,6 +162,7 @@ bool LegacyDecoder::Decode(uint8_t msb, const uint8_t* p, int n, WirelessPacket*
     imu = true;
   }
   if (imu) {
+    if (end - r < 13) return false;
     out->imuTs = uint32_t(msb) << 24 | uint32_t(lsb) << 16 | uint32_t(*r) << 8;
     std::memcpy(out->imuRaw, r + 1, 12);
     out->hasImu = true;

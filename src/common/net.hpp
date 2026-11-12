@@ -1,5 +1,5 @@
 // Minimal loopback TCP for the driver's telemetry and the viewer: non-blocking
-// sockets, POSIX or Winsock. Only what those two need.
+// sockets, POSIX or Winsock. Windows peers must have the same user SID.
 #pragma once
 #include <cstddef>
 #include <cstdint>

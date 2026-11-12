@@ -68,10 +68,11 @@ class TelemetryClient {
   const State& Current() const { return state_; }
   bool HaveState() const { return haveState_; }
   const std::deque<LogLine>& Logs() const { return logs_; }
-  void ClearLogs() { logs_.clear(); }
+  void ClearLogs() { logs_.clear(); logBytes_ = 0; }
   uint64_t LogsReceived() const { return received_; }
 
   static constexpr std::size_t kMaxLogs = 50000;
+  static constexpr std::size_t kMaxLogBytes = 4u << 20;
 
  private:
   void Handle(const std::string& line);
@@ -85,6 +86,7 @@ class TelemetryClient {
   bool helloed_ = false, haveState_ = false;
   State state_;
   std::deque<LogLine> logs_;
+  std::size_t logBytes_ = 0;
   uint64_t received_ = 0;
 };
 

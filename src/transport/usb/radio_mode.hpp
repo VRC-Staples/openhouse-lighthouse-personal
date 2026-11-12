@@ -3,9 +3,8 @@
 // A 0x2102 receiver's radio runs either Valve's wireless protocol or Bluetooth LE. SteamVR's
 // base station power management (vrmonitor) drives Bluetooth through the receiver's serial
 // port, but asks the headset's driver to switch the mode first (IVRDebug, device 0):
-// "set_radio_mode_ble", "set_radio_mode_valve", "get_radio_mode". Those requests reach the
-// stock driver through the headset's proxy, and it can't serve them here: it never sees the
-// receivers (stock_hmd.hpp). So ours answers, or the stations neither wake nor sleep.
+// "set_radio_mode_ble", "set_radio_mode_valve", "get_radio_mode". The personal driver
+// has no headset proxy and does not expose those headset debug requests.
 //
 // Addresses are the stock Windows DLL (SteamVR 2.19.2), and the reports were checked on a
 // Bigscreen Beyond's receivers. 0x2101 dongles answer the query with no mode.

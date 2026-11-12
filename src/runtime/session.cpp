@@ -642,6 +642,14 @@ bool SessionImpl::SetUpDevice(const DeviceId& id, const std::string& config) {
   auto& d = devices_[id];
   try {
     const json j = json::parse(config);
+    d.info.role = RoleFromConfig(config);
+    if (!options_.trackHeadsets && d.info.role == DeviceRole::Hmd) {
+      d.tracker.reset();
+      d.input.reset();
+      models_.erase(id);
+      Emit(SessionEventType::Log, id, "headset ignored by tracker/controller-only session");
+      return false;
+    }
     TrackedObjectModel model;
     std::string err;
     if (!TrackedObjectModel::FromJson(config, &model, &err)) throw std::runtime_error(err);

@@ -97,9 +97,7 @@ class Resources : public IVRResources {
   uint32_t GetResourceFullPath(const char*, const char*, char* v, uint32_t n) override { if (n) v[0] = 0; return 0; }
 } g_resources;
 
-// "IVRServerInternal_XXX" / "IVRServer_XXX": private SteamVR interfaces the stock driver
-// calls without checking (loaded by our driver for headsets, stock_hmd.hpp). Monado's
-// steamvr_lh serves a class of empty virtual functions; so do we.
+// Private SteamVR interfaces retained by the mock host for upstream test compatibility.
 struct ServerStub {
 #define LH_STUB(n) virtual void Unknown##n() {}
   LH_STUB(0) LH_STUB(1) LH_STUB(2) LH_STUB(3) LH_STUB(4) LH_STUB(5) LH_STUB(6) LH_STUB(7) LH_STUB(8) LH_STUB(9)

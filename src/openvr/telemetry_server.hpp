@@ -1,8 +1,7 @@
 // Serves the driver's live state and log to local viewers (lh/telemetry.hpp).
 //
-// The driver thread hands it snapshots and log lines; a thread of its own accepts
-// clients and writes to them, so a slow or stuck viewer never stalls tracking (a
-// client more than kMaxQueued behind is dropped).
+// The driver thread hands it snapshots and log lines. Connection count, queued bytes,
+// and nonblocking sends are bounded; slow clients are disconnected.
 #pragma once
 #include <atomic>
 #include <condition_variable>
@@ -41,8 +40,11 @@ class TelemetryServer {
   void PublishState(double time, const SessionSnapshot& snapshot, const std::vector<DeviceUpdate>& updates,
                     const std::vector<Session::Receiver>& receivers, const RoomStatus& room);
 
-  static constexpr std::size_t kBacklog = 2000;            // log lines a new client gets
-  static constexpr std::size_t kMaxQueued = 8 << 20;       // bytes
+  static constexpr std::size_t kBacklog = 2000;
+  static constexpr std::size_t kMaxQueued = 1 << 20;
+  static constexpr std::size_t kMaxClients = 2;
+  static constexpr std::size_t kMaxLine = 256 << 10;
+  static constexpr std::size_t kSendBudget = 64 << 10;
 
  private:
   struct Client {
@@ -56,6 +58,7 @@ class TelemetryServer {
   std::condition_variable wake_;
   std::vector<Client> clients_;
   std::deque<std::string> backlog_;
+  std::size_t backlogBytes_ = 0;
   net::Socket listener_ = net::kInvalid;
   std::string host_;
   std::thread thread_;
