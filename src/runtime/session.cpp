@@ -872,6 +872,7 @@ void SessionImpl::OnImu(const DeviceId& id, const ImuSample& sample) {
 //    light (runtime::ChooseLightMode, which decides all of the above).
 // With 1.0 and 2.0 stations used together (MixedLightOptions), UpdateMixedLight decides instead.
 void SessionImpl::UpdateLightMode(const DeviceId& id, Device& d) {
+#ifdef LH_RUNTIME_USB
   if (!usb_ || !d.attached) return;
   if (mixedActive_ && !d.lh1Only) {
     UpdateMixedLight(id, d);
@@ -906,6 +907,7 @@ void SessionImpl::UpdateLightMode(const DeviceId& id, Device& d) {
     Emit(SessionEventType::Log, id, id + ": light mode " + (step.mode ? "LH2" : "LH1") + " (" + step.why + ")");
   d.lightMode = step.mode;
   d.modeSince = now_;
+#endif
 }
 
 // runtime/mixed_light.hpp (Lh1KeyframesUsable): keeps LH1 frames that may hold unsorted 2.0 sweeps out of
@@ -937,6 +939,7 @@ void SessionImpl::UpdateLh1Keyframes(const DeviceId& id, Device& d) {
 // runtime/mixed_light.hpp: LH1 mode once the rotors in view are known, LH2 mode now and then to
 // time them again, and LH2 mode throughout for the kinds of device left out.
 void SessionImpl::UpdateMixedLight(const DeviceId& id, Device& d) {
+#ifdef LH_RUNTIME_USB
   constexpr double kCheckEvery = 0.05;  // s
   constexpr double kCalmSpeed = 0.5, kCalmTurn = 2.0;  // m/s, rad/s
   if (now_ < d.nextLightCheck) return;
@@ -995,6 +998,7 @@ void SessionImpl::UpdateMixedLight(const DeviceId& id, Device& d) {
   Emit(SessionEventType::Log, id, id + ": light mode " + (step.mode ? "LH2" : "LH1") + " (" + step.why + ")" + (view.mode < 0 ? "" : detail));
   d.lightMode = step.mode;
   d.modeSince = now_;
+#endif
 }
 
 // The scout (runtime/mixed_light.hpp), live and in replays alike: which light a device is in comes from
@@ -1805,13 +1809,17 @@ void SessionImpl::UpdateMixedRoom() {
   // making cost enough under the session's lock that the headset's USB reports were dropped (its IMU from
   // 1011 to 444-867 samples/s). Live, either way, the headset lost tracking after every switch-off.
   for (auto& [id, d] : devices_) {
+#ifdef LH_RUNTIME_USB
     const bool wasMixing = d.tracker && d.tracker->Source().Sorting();
+#endif
     StartMixedLight(d);
+#ifdef LH_RUNTIME_USB
     if (active || mixed_.enabled || !wasMixing || d.lightMode != 0 || !usb_ || !d.attached) continue;
     usb_->SetOpticalSubProtocol(id, 1);
     d.lightMode = 1;
     d.modeSince = d.modeSent = now_;
     Emit(SessionEventType::Log, id, id + ": light mode LH2 (1.0 + 2.0 switched off)");
+#endif
   }
   char text[160];
   if (active)
