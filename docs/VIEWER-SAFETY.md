@@ -47,7 +47,13 @@ the same second-resolution timestamp and process ID. A failed report no longer r
 existing path. If a name collision occurs, retry saving after the timestamp changes.
 
 This shared ZIP writer is also used by the driver's existing local report command.
-Report collection and its existing 4 GiB ZIP format limits are otherwise unchanged.
+A failed addition permanently prevents publication, even if a caller later calls `Close()`.
+Read errors are not treated as successful end-of-file. Byte limits apply during streaming,
+including central-directory output. Oversized names and entry counts are rejected before narrowing.
+The writer retains the existing non-ZIP64 format and its 32-bit size limits.
+
+These changes correct preview.2's incomplete finalization guard. Its staging protected existing
+reports, but a failed addition followed by `Close()` could publish an incomplete archive.
 
 ## Verification
 
@@ -55,6 +61,8 @@ Report collection and its existing 4 GiB ZIP format limits are otherwise unchang
 malformed messages, size and numeric boundaries, safe settings loading and replacement,
 and completed/failed/colliding ZIP writes. It is part of `openvr_components` in Windows CI.
 The local Zig safety suite also checks that publishing a new file cannot replace an old one.
+`tests/openvr/test_zip_writer.cpp` covers failure followed by finalization, streaming errors,
+format limits, and decompression. See [the review fixes](REVIEW-FIXES.md) for the full scope.
 
 These checks do not establish improved tracking, a clean antivirus verdict, or real VR compatibility.
 The previously created draft release is immutable for this change; its binary assets are not

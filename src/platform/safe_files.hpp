@@ -108,7 +108,13 @@ inline void BackupOnce(const fs::path& source, const fs::path& backup) {
     if (Read(backup) != original) throw std::runtime_error("Existing backup differs: " + backup.string());
     return;
   }
-  if (!fs::copy_file(source, backup, fs::copy_options::none) || Read(backup) != original)
-    throw std::runtime_error("Backup failed; destination was not changed: " + backup.string());
+  StagingDirectory stage(backup.parent_path());
+  AtomicWrite(stage.Payload(), original);
+  try {
+    PublishNew(stage.Payload(), backup);
+  } catch (const std::exception&) {
+    // A concurrent writer is acceptable only if it published the same complete backup.
+    if (!fs::exists(fs::symlink_status(backup)) || Read(backup) != original) throw;
+  }
 }
 }  // namespace lh::files

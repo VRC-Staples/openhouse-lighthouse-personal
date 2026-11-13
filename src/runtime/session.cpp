@@ -204,8 +204,10 @@ class SessionImpl final : public Session, public InputSinkBase {
   void SetDeviceEnabled(const std::string& serial, bool enabled) override;
   std::vector<Receiver> Receivers() const override {
     std::vector<Receiver> out;
+#ifdef LH_RUNTIME_USB
     if (usb_)
       for (const auto& r : usb_->Receivers()) out.push_back({r.serial, r.connected});
+#endif
     return out;
   }
   bool SetCapture(const std::string& path) override {
@@ -218,12 +220,19 @@ class SessionImpl final : public Session, public InputSinkBase {
     return false;
 #endif
   }
+#ifdef LH_RUNTIME_USB
   bool SetPairing(const std::string& receiver, double seconds) override {
     return usb_ && usb_->SetPairing(receiver, int(std::lround(seconds * 1000)));
   }
   bool HasBluetoothRadio() const override { return usb_ && usb_->HasBluetoothReceiver(); }
   bool SetBluetoothRadio(bool on) override { return usb_ && usb_->SetBluetoothRadio(on); }
   std::optional<bool> BluetoothRadioOn() override { return usb_ ? usb_->BluetoothRadioOn() : std::nullopt; }
+#else
+  bool SetPairing(const std::string&, double) override { return false; }
+  bool HasBluetoothRadio() const override { return false; }
+  bool SetBluetoothRadio(bool) override { return false; }
+  std::optional<bool> BluetoothRadioOn() override { return std::nullopt; }
+#endif
   bool Haptic(const std::string& serial, double frequency, double amplitude, double duration) override;
   bool PowerOff(const std::string& serial) override;
   bool SaveRoom(std::string* error) override;
@@ -232,6 +241,7 @@ class SessionImpl final : public Session, public InputSinkBase {
   void OnDeviceAttached(const DeviceId&, const std::string& configJson) override;
   // Device JSON -> tracker, role, input. False (and logged) if the config is unusable.
   bool SetUpDevice(const DeviceId& id, const std::string& config);
+  DeviceInfo ReadDeviceInfo(const DeviceId& id, const std::string& config, const json& j) const;
   // preinit/*.json: devices created at start, disconnected until they really connect.
   void LoadPreinit();
   void UpdatePreinit(const DeviceId& id, const std::string& config);
@@ -573,8 +583,13 @@ void SessionImpl::ReplayMain() {
                    if (options_.replayTo > 0 && at > options_.replayTo) { stop_ = true; return; }
                    if (options_.replayRealtime && !warming_) {  // the warm-up runs at full speed
                      if (first) { firstHost = r.hostTime; wallStart = SteadyNow(); first = false; }
-                     const double wait = (r.hostTime - firstHost) - (SteadyNow() - wallStart);
-                     if (wait > 0.0005) platform::SleepFor(std::chrono::microseconds(int64_t(wait * 1e6)));
+                     while (!stop_) {
+                       const double wait = (r.hostTime - firstHost) - (SteadyNow() - wallStart);
+                       if (!(wait > 0.0005)) break;
+                       // Bound cancellation latency and the conversion even for huge capture gaps.
+                       platform::SleepFor(std::chrono::microseconds(int64_t(std::min(wait, 0.01) * 1e6)));
+                     }
+                     if (stop_) return;
                    }
                    {
                      std::lock_guard lock(mutex_);
@@ -606,7 +621,7 @@ void SessionImpl::ReplayMain() {
                                     p.filterTime, p.filterPosition[0], p.filterPosition[1], p.filterPosition[2], p.hostTime);
                      }
                    }
-                 });
+                 }, [&] { return stop_.load(); });
   if (trace) std::fclose(trace);
   finished_ = true;
 #endif
@@ -638,58 +653,60 @@ void SessionImpl::OnDeviceAttached(const DeviceId& id, const std::string& config
   if (SetUpDevice(id, config) && !configJson.empty()) UpdatePreinit(id, configJson);
 }
 
+DeviceInfo SessionImpl::ReadDeviceInfo(const DeviceId& id, const std::string& config, const json& j) const {
+  DeviceInfo info = devices_.at(id).info;
+  info.batteryPercent.reset();
+  info.charging = false;
+  info.configJson = config;
+  info.role = RoleFromConfig(config);
+  info.controllerType = ControllerTypeFromConfig(config);
+  info.deviceClass = j.value("device_class", "");
+  info.model = j.value("model_number", "");
+  info.manufacturer = j.value("manufacturer", "");
+  info.renderModel = j.value("render_model", "");
+  info.resourceRoot = j.value("resource_root", "");
+  info.inputProfile = j.value("input_profile", "");
+  info.registeredType = j.value("registered_device_type", "");
+  info.controllerRole = j.value("tracked_controller_role", "");
+  if (const auto r = roles_.find(id); r != roles_.end() && info.role != DeviceRole::Hmd) {
+    if (r->second == "generic_tracker") {
+      info.role = DeviceRole::Tracker;
+      info.controllerRole.clear();
+    } else {
+      info.role = DeviceRole::Controller;
+      info.controllerRole = r->second;
+    }
+  } else if (explicitControllers_ && info.role != DeviceRole::Hmd) {
+    info.controllerRole.clear();
+    info.role = DeviceRole::Tracker;
+    if (id == leftController_ || id == rightController_) {
+      info.role = DeviceRole::Controller;
+      info.controllerRole = id == leftController_ ? "left_hand" : "right_hand";
+    }
+  }
+  return info;
+}
+
 bool SessionImpl::SetUpDevice(const DeviceId& id, const std::string& config) {
   auto& d = devices_[id];
   try {
     const json j = json::parse(config);
-    d.info.role = RoleFromConfig(config);
-    if (!options_.trackHeadsets && d.info.role == DeviceRole::Hmd) {
+    const auto role = RoleFromConfig(config);
+    if (!options_.trackHeadsets && role == DeviceRole::Hmd) {
+      d.info.role = role;
       d.tracker.reset();
       d.input.reset();
       models_.erase(id);
       Emit(SessionEventType::Log, id, "headset ignored by tracker/controller-only session");
       return false;
     }
+    auto info = ReadDeviceInfo(id, config, j);
     TrackedObjectModel model;
     std::string err;
     if (!TrackedObjectModel::FromJson(config, &model, &err)) throw std::runtime_error(err);
-    ApplyModelScale(id, j.value("resource_root", ""), &model);
+    ApplyModelScale(id, info.resourceRoot, &model);
     ApplyLearnedImu(id, config, &model);
-    // A radio reconnect is a new timestamp/protocol epoch, not a duplicate attach.
-    d.haveClock = false;
-    d.clockOffset = 0;
-    d.info.batteryPercent.reset();
-    d.info.charging = false;
-    d.input.reset();
-    d.info.configJson = config;
-    d.info.role = RoleFromConfig(config);
-    d.info.controllerType = ControllerTypeFromConfig(config);
-    d.info.deviceClass = j.value("device_class", "");
-    d.info.model = j.value("model_number", "");
-    d.info.manufacturer = j.value("manufacturer", "");
-    d.info.renderModel = j.value("render_model", "");
-    d.info.resourceRoot = j.value("resource_root", "");
-    d.info.inputProfile = j.value("input_profile", "");
-    d.info.registeredType = j.value("registered_device_type", "");
-    d.info.controllerRole = j.value("tracked_controller_role", "");
-    if (const auto r = roles_.find(id); r != roles_.end() && d.info.role != DeviceRole::Hmd) {
-      // settings.json "roles": the values of tracked_controller_role.
-      if (r->second == "generic_tracker") {
-        d.info.role = DeviceRole::Tracker;
-        d.info.controllerRole.clear();
-      } else {
-        d.info.role = DeviceRole::Controller;
-        d.info.controllerRole = r->second;
-      }
-    } else if (explicitControllers_ && d.info.role != DeviceRole::Hmd) {
-      d.info.controllerRole.clear();
-      d.info.role = DeviceRole::Tracker;
-      if (id == leftController_ || id == rightController_) {
-        d.info.role = DeviceRole::Controller;
-        d.info.controllerRole = id == leftController_ ? "left_hand" : "right_hand";
-      }
-    }
-    d.info.sensors = model.InImuFrame().points;
+    info.sensors = model.InImuFrame().points;
     // imuFromHead = (objectFromImu)^-1 * objectFromHead.
     Eigen::Isometry3d objectFromImu = Eigen::Isometry3d::Identity();
     const auto& r = model.objectFromImuRotation;
@@ -701,29 +718,36 @@ bool SessionImpl::SetUpDevice(const DeviceId& id, const std::string& config) {
     // Tundra Trackers ship an identity head, so their pose (and model) came out bottom-up
     // (#40). The stock driver replaces exactly that case (in 0x1dec60): plus_x -1,0,0,
     // plus_z 0,0,-1 (180 deg about Y), position 0,0,0.001577.
-    if (d.info.manufacturer == "Tundra Labs" && d.info.model == "Tundra Tracker" &&
+    if (info.manufacturer == "Tundra Labs" && info.model == "Tundra Tracker" &&
         objectFromHead.isApprox(Eigen::Isometry3d::Identity(), 1e-9)) {
       AxesRotation(json{{"plus_x", {-1.0, 0.0, 0.0}}, {"plus_z", {0.0, 0.0, -1.0}}, {"position", {0.0, 0.0, 0.001577}}},
                    &objectFromHead);
     }
-    d.imuFromHead = objectFromImu.inverse() * objectFromHead;
+    const Eigen::Isometry3d imuFromHead = objectFromImu.inverse() * objectFromHead;
     model.serial = id;
-    d.tracker = std::make_unique<DeviceTracker>(id, model, &room_);
-    d.tracker->SetSmoothing(smoothPosition_, smoothRotation_);
-    d.tracker->SetReportAcceleration(reportAcceleration_);
-    d.tracker->SetHoldStill(d.info.role != DeviceRole::Hmd);  // a still head must not freeze the view
-    StartMixedLight(d);
-    models_[id] = d.tracker->ImuModel();
-    for (const auto& [serial, b] : bases_) d.tracker->OnBaseConfig(b.config, b.dynamic);
-    PushIdentities();
+    auto tracker = std::make_unique<DeviceTracker>(id, model, &room_);
+    tracker->SetSmoothing(smoothPosition_, smoothRotation_);
+    tracker->SetReportAcceleration(reportAcceleration_);
+    tracker->SetHoldStill(info.role != DeviceRole::Hmd);  // a still head must not freeze the view
+    for (const auto& [serial, b] : bases_) tracker->OnBaseConfig(b.config, b.dynamic);
     // HTC's trackers report their pogo pins and power button in the wand's input format (the
     // stock driver reads them with the wand's button ids; libsurvive with the wand's bits), so
     // they get the wand's decoder. Other makers' trackers (Tundra) keep their inputs ignored.
-    const bool htcTracker = d.info.role == DeviceRole::Tracker &&
-                            (d.info.manufacturer.empty() || Lower(d.info.manufacturer) == "htc");
-    if (d.info.role == DeviceRole::Controller) d.input.emplace(d.info.controllerType);
-    else if (htcTracker) d.input.emplace(ControllerType::ViveWand);
-    else d.input.reset();
+    const bool htcTracker = info.role == DeviceRole::Tracker &&
+                           (info.manufacturer.empty() || Lower(info.manufacturer) == "htc");
+    std::optional<ControllerInputDecoder> input;
+    if (info.role == DeviceRole::Controller) input.emplace(info.controllerType);
+    else if (htcTracker) input.emplace(ControllerType::ViveWand);
+    // All configuration-dependent operations succeeded. Commit the replacement together.
+    d.info = std::move(info);
+    d.tracker = std::move(tracker);
+    d.input = std::move(input);
+    d.imuFromHead = imuFromHead;
+    d.haveClock = false;
+    d.clockOffset = 0;
+    StartMixedLight(d);
+    models_[id] = d.tracker->ImuModel();
+    PushIdentities();
     Emit(SessionEventType::DeviceActivated, id,
          id + " activated as " + ToString(d.info.role) + (d.info.model.empty() ? "" : " (" + d.info.model + ")") +
              (Enabled(id) ? "" : " [disabled]"));
@@ -797,7 +821,9 @@ void SessionImpl::OnDeviceDetached(const DeviceId& id) {
   // Free the receiver that was carrying this device. SteamVR asks which dongles are still
   // occupied before it offers a pairing, and a stale "connected" there means the dongle looks
   // busy until the receiver is physically unplugged.
+#ifdef LH_RUNTIME_USB
   if (usb_) usb_->OnDeviceGone(id);
+#endif
   auto found = devices_.find(id);
   if (found == devices_.end()) return;
   found->second.attached = false;

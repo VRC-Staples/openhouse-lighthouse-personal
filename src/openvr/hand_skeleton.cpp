@@ -1,4 +1,5 @@
 #include "hand_skeleton.hpp"
+#include "glb_accessor.hpp"
 #include <Eigen/Geometry>
 #include <nlohmann/json.hpp>
 #include <algorithm>
@@ -101,28 +102,22 @@ std::vector<Bones> LoadFrames(const std::string& path, bool left) {
   std::vector<uint8_t> bytes((std::istreambuf_iterator<char>(f)), {});
   if (Word(bytes, 0) != 0x46546c67 || Word(bytes, 4) != 2 || Word(bytes, 8) != bytes.size() ||
       Word(bytes, 16) != 0x4e4f534a) throw std::runtime_error("invalid GLB header");
-  const size_t n = Word(bytes, 12), bin = 28 + n;
-  if (bin > bytes.size() || Word(bytes, 24 + n) != 0x004e4942) throw std::runtime_error("missing GLB BIN");
+  const size_t n = Word(bytes, 12);
+  if (bytes.size() < 28 || n > bytes.size() - 28 || Word(bytes, 24 + n) != 0x004e4942)
+    throw std::runtime_error("missing GLB BIN");
+  const size_t bin = 28 + n, binSize = Word(bytes, 20 + n);
+  if (!GlbRange(bin, binSize, bytes.size())) throw std::runtime_error("truncated GLB BIN");
   const json j = json::parse(bytes.begin() + 20, bytes.begin() + 20 + n);
   if (j.at("nodes").size() != 32 || j.at("nodes")[1].at("name") != "REF:Root")
     throw std::runtime_error("unsupported Valve hand hierarchy");
-  auto values = [&](int index, size_t frame, int count) {
-    const auto& a = j.at("accessors").at(index);
-    const auto& v = j.at("bufferViews").at(a.at("bufferView").get<int>());
-    if (a.at("componentType") != 5126 || a.contains("sparse") ||
-        a.at("type") != (count == 3 ? "VEC3" : "VEC4")) throw std::runtime_error("unsupported accessor");
-    frame = std::min(frame, a.at("count").get<size_t>() - 1);
-    const size_t at = bin + v.value("byteOffset", size_t(0)) + a.value("byteOffset", size_t(0)) +
-                      frame * v.value("byteStride", size_t(count * 4));
-    if (at + count * 4 > bytes.size()) throw std::runtime_error("bad accessor bounds");
-    std::vector<float> out(count);
-    std::memcpy(out.data(), bytes.data() + at, count * 4);
-    for (float x : out) if (!std::isfinite(x)) throw std::runtime_error("nonfinite bone");
-    return out;
+  auto values = [&](const json& index, size_t frame, size_t count) {
+    return GlbValues(j, bytes, bin, binSize, GlbSize(index), frame, count);
   };
   const auto& anim = j.at("animations").at(0);
-  const size_t frames = j.at("accessors").at(anim.at("samplers").at(0).at("input").get<int>()).at("count").get<size_t>();
-  if (frames == 0) throw std::runtime_error("empty animation in " + path);
+  const size_t frames = GlbSize(j.at("accessors").at(
+      GlbSize(anim.at("samplers").at(0).at("input"))).at("count"));
+  if (!frames || frames > binSize / sizeof(float))
+    throw std::runtime_error("invalid animation frame count in " + path);
   std::vector<Bones> out(frames);
   for (size_t frame = 0; frame < frames; ++frame) {
     Bones& bones = out[frame];
@@ -132,7 +127,7 @@ std::vector<Bones> LoadFrames(const std::string& path, bool left) {
       auto q = node.value("rotation", std::vector<float>{0, 0, 0, 1});
       for (const auto& ch : anim.at("channels")) {
         if (ch.at("target").at("node") != i + 1) continue;
-        const auto& s = anim.at("samplers").at(ch.at("sampler").get<int>());
+        const auto& s = anim.at("samplers").at(GlbSize(ch.at("sampler")));
         const auto kind = ch.at("target").at("path").get<std::string>();
         if (kind == "translation") t = values(s.at("output"), frame, 3);
         if (kind == "rotation") q = values(s.at("output"), frame, 4);

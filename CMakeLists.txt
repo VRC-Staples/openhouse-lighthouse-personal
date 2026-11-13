@@ -52,7 +52,8 @@ find_package(Threads REQUIRED)
 
 # ---- tracking: no hardware dependencies ---------------------------------------
 # ---- lh_common: what every layer shares (log levels) ---------------------------
-add_library(lh_common STATIC src/runtime/log_level.cpp src/common/net.cpp)
+add_library(lh_common STATIC src/runtime/log_level.cpp src/common/net.cpp src/platform/paths.cpp)
+target_link_libraries(lh_common PRIVATE nlohmann_json::nlohmann_json)
 target_include_directories(lh_common PRIVATE src)
 set_target_properties(lh_common PROPERTIES POSITION_INDEPENDENT_CODE ON)
 target_compile_features(lh_common PUBLIC cxx_std_20)
@@ -279,6 +280,7 @@ if(LH_BUILD_VIEWER)
     target_include_directories(lh_imgui PUBLIC third_party/imgui)
     target_link_libraries(lh_imgui PUBLIC glfw OpenGL::GL)
     target_compile_options(lh_imgui PRIVATE -w)
+    target_compile_definitions(lh_imgui PRIVATE IMGUI_DISABLE_DEFAULT_SHELL_FUNCTIONS)
     add_executable(lhviz apps/lhviz/main.cpp)
     target_link_libraries(lhviz PRIVATE lh lh_imgui Eigen3::Eigen)
     install(TARGETS lhviz RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
@@ -297,6 +299,11 @@ endif()
 # ---- tests --------------------------------------------------------------------
 if(LH_BUILD_TESTS)
   enable_testing()
+  enable_language(C)
+  add_executable(lh_firmware_number_tests tests/personal/test_firmware_numbers.c)
+  target_compile_features(lh_firmware_number_tests PRIVATE c_std_11)
+  target_include_directories(lh_firmware_number_tests PRIVATE basestation_firmware/src)
+  add_test(NAME firmware_numbers COMMAND lh_firmware_number_tests)
   add_executable(lh_personal_safety_tests tests/personal/test_safety.cpp
     src/transport/usb/wireless_decoder.cpp src/common/net.cpp)
   target_include_directories(lh_personal_safety_tests PRIVATE src apps/openhouse-installer)
@@ -313,7 +320,7 @@ if(LH_BUILD_TESTS)
   endif()
   find_package(GTest REQUIRED)
   add_executable(lh_unit_tests
-    tests/unit/test_platform.cpp
+    tests/unit/test_platform.cpp tests/unit/test_review_platform.cpp
     tests/unit/test_tracking_source.cpp
     tests/unit/test_pose_solver.cpp
     tests/unit/test_tracker.cpp
@@ -331,7 +338,7 @@ if(LH_BUILD_TESTS)
   endif()
   if(LH_BUILD_USB)
     target_sources(lh_unit_tests PRIVATE tests/unit/test_report_parser.cpp tests/unit/test_device_config.cpp
-      tests/unit/test_raw_capture.cpp tests/unit/test_radio_mode.cpp)
+      tests/unit/test_raw_capture.cpp tests/unit/test_radio_mode.cpp tests/unit/test_receiver_lifecycle.cpp)
     target_link_libraries(lh_unit_tests PRIVATE lh_usb)
     add_executable(lh_replay_tests tests/integration/test_replay.cpp)
     target_compile_definitions(lh_replay_tests PRIVATE LH_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
@@ -343,6 +350,7 @@ if(LH_BUILD_TESTS)
   if(TARGET driver_lighthouse)
     add_executable(lh_openvr_component_tests tests/openvr/test_components.cpp
       tests/openvr/test_personal_boundaries.cpp tests/openvr/test_viewer_guards.cpp
+      tests/openvr/test_zip_writer.cpp tests/openvr/test_glb_bounds.cpp
       apps/openhouse-viewer/telemetry_client.cpp
       src/openvr/hand_skeleton.cpp src/openvr/raw_alignment.cpp src/openvr/steam_rooms.cpp src/openvr/room_publisher.cpp src/openvr/host_frame.cpp src/openvr/telemetry_server.cpp)
     target_include_directories(lh_openvr_component_tests PRIVATE src tests
@@ -364,7 +372,8 @@ if(LH_BUILD_TESTS)
     add_test(NAME openvr_driver COMMAND lh_openvr_host_test $<TARGET_FILE:driver_lighthouse>
       ${CMAKE_SOURCE_DIR}/tests/data/captures/session-20261016-142931Z-147083/input.lhraw 14)
   endif()
-  add_executable(lh_runtime_tests tests/runtime/test_runtime.cpp tests/runtime/test_personal_profile.cpp)
+  add_executable(lh_runtime_tests tests/runtime/test_runtime.cpp tests/runtime/test_personal_profile.cpp
+    tests/runtime/test_review_runtime.cpp)
   target_include_directories(lh_runtime_tests PRIVATE src tests)
   target_compile_definitions(lh_runtime_tests PRIVATE LH_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
   if(LH_BUILD_USB)

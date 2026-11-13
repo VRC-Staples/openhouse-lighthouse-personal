@@ -61,6 +61,10 @@ class ReportDecoder {
     auto it = eps_.find(ep);
     return it == eps_.end() ? 0 : it->second.generation;
   }
+  bool WirelessConnected(uint16_t ep) const {
+    const auto it = eps_.find(ep);
+    return it != eps_.end() && it->second.connected;
+  }
   void SetVersionNegotiation(uint16_t ep) { eps_.at(ep).versioning = true; }
   WirelessReportParser* Wireless(uint16_t ep) {
     auto it = eps_.find(ep);
@@ -137,6 +141,7 @@ class UsbTransport {
   static std::string LoadSteamConfig(const std::string& dir, const std::string& serial);
 
  private:
+  friend struct UsbTransportTestAccess;
   struct Open {
     EndpointInfo info;
     hid_device_* dev = nullptr;
@@ -155,6 +160,7 @@ class UsbTransport {
   void Enumerate(bool startup);  // opens interfaces not open yet
   void CompleteSetup(Open& o, bool supportsVersioning);
   void RequestVersion(Open& o);
+  void ProcessReport(Open& o, double time, bool last, const uint8_t* data, size_t size);
   void Run();
   void ProbeMain();  // hotplug: new interfaces, and receivers with no device connected yet
   static bool FetchRangeModes(hid_device_* dev, int8_t& gyro, int8_t& accel);

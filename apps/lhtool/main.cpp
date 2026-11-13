@@ -393,7 +393,7 @@ int SessionCommand(int argc, char** argv) {
       printf("%s\n", j.dump().c_str());
     }
   };
-  while (true) {
+  while (!interrupted) {
     emit();
     if (!live && session->Finished()) break;
     if (seconds > 0 && std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count() > seconds) break;

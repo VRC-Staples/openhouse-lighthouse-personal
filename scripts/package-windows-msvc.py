@@ -22,7 +22,7 @@ SYSTEM_DLLS = {
     'shlwapi.dll', 'user32.dll', 'version.dll', 'winmm.dll', 'ws2_32.dll',
 }
 REQUIRED_TESTS = {
-    'personal_safety', 'personal_shutdown', 'unit', 'replay', 'openvr_components',
+    'personal_safety', 'personal_shutdown', 'firmware_numbers', 'unit', 'replay', 'openvr_components',
     'openvr_driver', 'runtime', 'capture_help', 'capture_bad_duration', 'capture_no_overwrite',
 }
 
@@ -86,6 +86,9 @@ def copy_artifacts(build, destination):
         data = source.read_bytes()
         require_x64(data, source.suffix == '.dll')
         imports = require_imports(output('dumpbin', '/dependents', str(source)))
+        if source.name == 'openhouse-viewer.exe':
+            if re.search(r'\bShellExecute(?:Ex)?[AW]\b', output('dumpbin', '/imports', str(source))):
+                raise ValueError('The viewer still imports a shell-opening callback')
         if source.suffix == '.dll':
             require_exports(output('dumpbin', '/exports', str(source)))
             if b'openhouse-personal-lighthouse-only' not in data:

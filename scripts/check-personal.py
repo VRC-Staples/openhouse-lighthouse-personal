@@ -33,6 +33,13 @@ def main():
     if version != '0.15.2':
         raise RuntimeError(f'Expected existing Zig 0.15.2, found {version}')
     OUT.mkdir(exist_ok=True)
+    run([zig, 'cc', '-target', 'x86_64-windows-gnu', '-std=c11', '-Wall', '-Wextra',
+         '-Ibasestation_firmware/src', 'tests/personal/test_firmware_numbers.c',
+         '-o', str(OUT / 'firmware-numbers.exe')], 'compile-firmware-numbers')
+    run([str(OUT / 'firmware-numbers.exe')], 'test-firmware-numbers')
+    run([zig, 'cc', '-target', 'x86_64-windows-gnu', '-std=c11', '-S', '-emit-llvm',
+         '-Ibasestation_firmware/src', 'basestation_firmware/src/console.c',
+         '-o', str(OUT / 'console-host.ll')], 'compile-console-host-ir')
     compiler = [zig, 'c++', '-target', 'x86_64-windows-gnu', '-std=c++20', '-O0',
                 '-g', '-Wall', '-Wextra', '-Isrc', '-Iapps/openhouse-installer']
     run(compiler + ['tests/personal/test_safety.cpp',

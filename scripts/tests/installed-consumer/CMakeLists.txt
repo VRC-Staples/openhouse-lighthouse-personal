@@ -1,0 +1,8 @@
+cmake_minimum_required(VERSION 3.20)
+project(lighthouse_consumer LANGUAGES CXX)
+if(MSVC)
+  set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+endif()
+find_package(lighthouse CONFIG REQUIRED)
+add_executable(consumer main.cpp)
+target_link_libraries(consumer PRIVATE lh::lh lh::tracking)

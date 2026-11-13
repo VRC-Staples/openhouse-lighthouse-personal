@@ -155,7 +155,7 @@ std::string SaveBugReportOnce(const BugReportOptions& options, std::string* erro
   bool ok = writer.AddText("info.txt", info.str());
   if (!options.log.empty()) ok = ok && writer.AddText("openhouse-log.txt", options.log);
   for (const auto& [name, source] : present) ok = ok && writer.AddFile(name, source);
-  ok = writer.Close() && ok;
+  ok = ok && writer.Close();
   if (!ok)
     return fail("writing " + Utf8(zip) + " failed (out of space, or a file over 4 GB)");
   return Utf8(zip);

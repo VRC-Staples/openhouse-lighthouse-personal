@@ -53,6 +53,7 @@ $build = "$repo/build-ci"
 $triplet = 'x64-windows-static-release'
 Run python @('scripts/tests/test_package_windows.py')
 Run cmake @('-P', 'scripts/tests/check-triplet.cmake')
+Run cmake @('-P', 'scripts/tests/check-package-dependencies.cmake')
 Run cmake @('-S', '.', '-B', $build, '-G', 'Ninja', '-DCMAKE_BUILD_TYPE=Release',
     "-DCMAKE_TOOLCHAIN_FILE=$tools/scripts/buildsystems/vcpkg.cmake",
     "-DVCPKG_OVERLAY_TRIPLETS=$repo/cmake/triplets", "-DVCPKG_TARGET_TRIPLET=$triplet",
@@ -60,11 +61,35 @@ Run cmake @('-S', '.', '-B', $build, '-G', 'Ninja', '-DCMAKE_BUILD_TYPE=Release'
 Run cmake @('--build', $build, '--parallel', '2')
 Run ctest @('--test-dir', $build, '--output-on-failure', '--timeout', '180',
     '--output-junit', "$build/ctest-results.xml")
+Run "$build/lh_openvr_component_tests.exe" @('--gtest_filter=GlbBounds.*:ReportTransactions.*:ReportLimits.*')
+Run "$build/lh_unit_tests.exe" @('--gtest_filter=PlatformReview.*:ReceiverLifecycle.*')
+Run "$build/lh_runtime_tests.exe" @('--gtest_filter=MappedBounds.*:DeviceSetup.*:ReplayLifecycle.*')
 Run python @('scripts/package-windows-msvc.py', $build, "$build/vcpkg_installed/$triplet")
+
+# Reuse the approved installed dependencies. These configurations cannot install packages.
+$reuse = @('-G', 'Ninja', '-DCMAKE_BUILD_TYPE=Release',
+    "-DCMAKE_TOOLCHAIN_FILE=$tools/scripts/buildsystems/vcpkg.cmake",
+    "-DVCPKG_OVERLAY_TRIPLETS=$repo/cmake/triplets", "-DVCPKG_TARGET_TRIPLET=$triplet",
+    "-DVCPKG_INSTALLED_DIR=$build/vcpkg_installed", '-DVCPKG_MANIFEST_INSTALL=OFF')
+$stage = "$build/installed-consumer-prefix"
+Run cmake @('--install', $build, '--prefix', $stage)
+Run cmake (@('-S', 'scripts/tests/installed-consumer', '-B', "$build/consumer",
+    "-DCMAKE_PREFIX_PATH=$stage") + $reuse)
+Run cmake @('--build', "$build/consumer", '--parallel', '2')
+$oldPath = $env:PATH
+try {
+    $env:PATH = "$stage/bin;$oldPath"
+    Run "$build/consumer/consumer.exe" @()
+} finally { $env:PATH = $oldPath }
+Run cmake (@('-S', '.', '-B', "$repo/build-ci-usb-off", '-DLH_BUILD_USB=OFF',
+    '-DLH_BUILD_TOOLS=OFF', '-DLH_BUILD_VIEWER=OFF', '-DLH_BUILD_TESTS=OFF') + $reuse)
+Run cmake @('--build', "$repo/build-ci-usb-off", '--target', 'lh', '--parallel', '2')
 $summary = @"
 ## Windows build passed
 - Driver, installer, viewer, and hardware-free CTest targets built and checked.
 - Package imports, driver exports, checksums, licenses, and source revision checked.
+- USB-off runtime built; installed Windows consumer linked and ran without starting USB.
+- Firmware numeric tests ran on the host; Linux/Apple dependency selection used stubs.
 - Source: $env:GITHUB_SHA
 - Runner image: $env:ImageVersion; MSVC: $env:VCToolsVersion
 - Not checked: real VR hardware, signing, antivirus verdict, or stock-driver oracle tests.

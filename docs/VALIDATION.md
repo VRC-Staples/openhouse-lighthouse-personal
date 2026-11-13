@@ -40,6 +40,11 @@ They run in Windows CI; the local Zig-only check does not run them:
 - Disconnect the viewer on an incorrectly typed JSON message without an uncaught exception.
 - Refuse to overwrite an existing SteamVR database when reading is denied but replacement is permitted.
 
+The [post-preview.2 review fixes](REVIEW-FIXES.md) add parser, report, recovery, and lifecycle
+regressions. CI also builds the USB-off runtime and an installed Windows consumer.
+Local checks compile the firmware console to host LLVM IR and run its numeric parser tests.
+Neither operation builds or executes ARM firmware.
+
 Additional viewer guard tests cover protocol greetings, bounded messages and collections,
 numeric overflow, settings validation and atomic replacement, and report ZIP publication
 without overwriting existing reports. See [viewer safeguards](VIEWER-SAFETY.md).

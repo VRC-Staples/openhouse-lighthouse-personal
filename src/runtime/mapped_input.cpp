@@ -2,6 +2,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
+#include <stdexcept>
 #include <nlohmann/json.hpp>
 
 namespace lh::runtime {
@@ -26,13 +28,22 @@ std::pair<std::string, std::string> NameAndField(const std::string& path) {
 int IntOr(const json& j, const char* key, int fallback) {
   if (!j.contains(key)) return fallback;
   const auto& v = j.at(key);
-  return v.is_number() ? v.get<int>() : fallback;
+  if (v.is_number_unsigned()) {
+    if (v.get<uint64_t>() <= uint64_t(std::numeric_limits<int>::max())) return v.get<int>();
+  } else if (v.is_number_integer()) {
+    const auto n = v.get<int64_t>();
+    if (n >= std::numeric_limits<int>::min() && n <= std::numeric_limits<int>::max())
+      return int(n);
+  }
+  throw std::invalid_argument("invalid mapped integer");
 }
 
 double DoubleOr(const json& j, const char* key, double fallback) {
   if (!j.contains(key)) return fallback;
   const auto& v = j.at(key);
-  return v.is_number() ? v.get<double>() : fallback;
+  if (!v.is_number() || !std::isfinite(v.get<double>()))
+    throw std::invalid_argument("invalid mapped scalar");
+  return v.get<double>();
 }
 }  // namespace
 
@@ -90,11 +101,15 @@ bool ParseMappedProfile(const std::string& profileJson, const std::string& hand,
 
 std::optional<double> MappedValue(const std::vector<uint8_t>& record, const MappedComponent& c) {
   if (c.kind == MappedComponent::Kind::Haptic) return std::nullopt;
-  const int end = c.bitOffset + c.bitWidth;
-  if (c.bitOffset < 0 || end > int(record.size()) * 8) return std::nullopt;
+  if (c.bitOffset < 0 || c.bitWidth < 1 || c.bitWidth > 32 ||
+      !std::isfinite(c.min) || !std::isfinite(c.max) || !std::isfinite(c.max - c.min))
+    return std::nullopt;
+  const size_t offset = size_t(c.bitOffset), byte = offset / 8;
+  const size_t needed = (offset % 8 + size_t(c.bitWidth) + 7) / 8;
+  if (byte > record.size() || needed > record.size() - byte) return std::nullopt;
   uint64_t v = 0;
   for (int i = 0; i < c.bitWidth; ++i) {
-    const int bit = c.bitOffset + i;
+    const size_t bit = offset + size_t(i);
     if (record[size_t(bit / 8)] >> (bit % 8) & 1) v |= uint64_t(1) << i;
   }
   if (c.kind == MappedComponent::Kind::Bool) return v ? 1.0 : 0.0;

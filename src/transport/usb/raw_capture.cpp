@@ -74,10 +74,11 @@ bool RawCaptureReader::Open(const std::string& path) {
 }
 
 bool RawCaptureReader::ReadAll(const std::function<void(const EndpointInfo&)>& onEndpoint,
-                               const std::function<void(const RawReport&)>& onReport) {
+                               const std::function<void(const RawReport&)>& onReport,
+                               const std::function<bool()>& cancelled) {
   if (!f_) return false;
   uint8_t type;
-  while (R(f_, type)) {
+  while ((!cancelled || !cancelled()) && R(f_, type)) {
     if (type == 1) {
       EndpointInfo e;
       uint8_t kind;

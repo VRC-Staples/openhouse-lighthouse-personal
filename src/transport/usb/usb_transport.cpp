@@ -447,6 +447,21 @@ void UsbTransport::RequestVersion(Open& o) {
   RequestProtocolVersion(o.dev, wirelessProtocol_);
 }
 
+void UsbTransport::ProcessReport(Open& o, double time, bool last, const uint8_t* data, size_t size) {
+  const bool wasConnected = decoder_.WirelessConnected(o.info.ep);
+  decoder_.OnReport(time, o.info.ep, last, data, size);
+  if (o.info.kind != EndpointKind::Wireless) return;
+  const auto generation = decoder_.WirelessGeneration(o.info.ep);
+  const bool connected = decoder_.WirelessConnected(o.info.ep);
+  if (wasConnected != connected || generation != o.generation)
+    SetReceiver(o, connected ? o.info.serial : "");
+  if (generation != o.generation) {
+    o.generation = generation;
+    Log(LogLevel::Info, "%s: radio epoch changed; resetting protocol and timestamp state\n", o.info.serial.c_str());
+    if (o.wantVersion) RequestVersion(o);
+  }
+}
+
 void UsbTransport::SetReceiver(const Open& o, const std::string& connected) {
   std::lock_guard lock(receiversMutex_);
   receivers_[o.receiver] = Receiver{o.receiver, connected, o.info.pid};
@@ -762,12 +777,7 @@ void UsbTransport::Run() {
       for (int i = 0; i < count; i++) {
         const bool last = i == count - 1;
         capture_.WriteReport(reps[i].t, o.info.ep, last, reps[i].buf, size_t(reps[i].n));
-        decoder_.OnReport(reps[i].t, o.info.ep, last, reps[i].buf, size_t(reps[i].n));
-        if (o.info.kind == EndpointKind::Wireless && decoder_.WirelessGeneration(o.info.ep) != o.generation) {
-          o.generation = decoder_.WirelessGeneration(o.info.ep);
-          Log(LogLevel::Info, "%s: radio epoch changed; resetting protocol and timestamp state\n", o.info.serial.c_str());
-          if (o.wantVersion) RequestVersion(o);
-        }
+        ProcessReport(o, reps[i].t, last, reps[i].buf, size_t(reps[i].n));
       }
       if (o.disconnected) sink_->OnDeviceDetached(o.info.serial);
     }

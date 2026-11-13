@@ -67,9 +67,11 @@ class RawCaptureReader {
   RawCaptureReader& operator=(const RawCaptureReader&) = delete;
   ~RawCaptureReader();
   bool Open(const std::string& path);
-  // Calls onEndpoint / onReport in file order. Returns false on format error.
+  // Calls in file order. Cancellation ends successfully without reading the remaining file.
+  // Returns false on format or I/O error.
   bool ReadAll(const std::function<void(const EndpointInfo&)>& onEndpoint,
-               const std::function<void(const RawReport&)>& onReport);
+               const std::function<void(const RawReport&)>& onReport,
+               const std::function<bool()>& cancelled = {});
 
  private:
   FILE* f_ = nullptr;

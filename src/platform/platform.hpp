@@ -94,25 +94,8 @@ inline std::string OpenVRPathsFile() {
   return (dir.empty() ? Home() + "/.config" : dir) + "/openvr/openvrpaths.vrpath";
 #endif
 }
-// The quoted strings of a top-level JSON array `key` (JSON escapes undone). Enough for
-// openvrpaths.vrpath, which SteamVR writes; not a general JSON parser.
-inline std::vector<std::string> JsonStringList(const std::string& text, const std::string& key) {
-  std::vector<std::string> out;
-  auto at = text.find("\"" + key + "\"");
-  if (at == std::string::npos) return out;
-  at = text.find_first_of("[n", at + key.size() + 2);  // the list, or null
-  if (at == std::string::npos || text[at] != '[') return out;
-  for (size_t i = at + 1; i < text.size() && text[i] != ']'; ++i) {
-    if (text[i] != '"') continue;
-    std::string value;
-    for (++i; i < text.size() && text[i] != '"'; ++i) {
-      if (text[i] == '\\' && i + 1 < text.size()) ++i;
-      value += text[i];
-    }
-    out.push_back(value);
-  }
-  return out;
-}
+// Parse a top-level string array, including JSON Unicode escapes. Invalid input is empty.
+std::vector<std::string> JsonStringList(const std::string& text, const std::string& key);
 inline std::string SteamVRFromOpenVRPaths() {
   std::ifstream in(OpenVRPathsFile(), std::ios::binary);
   const std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
@@ -158,13 +141,17 @@ inline void SleepFor(std::chrono::microseconds duration) {
 #ifndef CREATE_WAITABLE_TIMER_HIGH_RESOLUTION
 #define CREATE_WAITABLE_TIMER_HIGH_RESOLUTION 0x00000002
 #endif
-  thread_local HANDLE timer =
-      CreateWaitableTimerExW(nullptr, nullptr, CREATE_WAITABLE_TIMER_HIGH_RESOLUTION, TIMER_ALL_ACCESS);
-  if (timer) {
+  struct Timer {
+    HANDLE handle = CreateWaitableTimerExW(
+        nullptr, nullptr, CREATE_WAITABLE_TIMER_HIGH_RESOLUTION, TIMER_ALL_ACCESS);
+    ~Timer() { if (handle) CloseHandle(handle); }
+  };
+  thread_local Timer timer;
+  if (timer.handle) {
     LARGE_INTEGER due;
     due.QuadPart = -static_cast<LONGLONG>(duration.count()) * 10;  // relative, 100 ns units
-    if (SetWaitableTimer(timer, &due, 0, nullptr, nullptr, FALSE)) {
-      WaitForSingleObject(timer, INFINITE);
+    if (SetWaitableTimer(timer.handle, &due, 0, nullptr, nullptr, FALSE)) {
+      WaitForSingleObject(timer.handle, INFINITE);
       return;
     }
   }

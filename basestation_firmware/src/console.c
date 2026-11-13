@@ -2,6 +2,7 @@
 #include <stdarg.h>
 #include <string.h>
 #include "console.h"
+#include "number_parse.h"
 #include "usb_cdc.h"
 #include "params.h"
 #include "modes.h"
@@ -29,8 +30,9 @@ static void put_uint(uint32_t v, unsigned base, int width, char pad, bool upper)
 
 static void put_float(float f, int prec)
 {
-    if (f != f) { out("nan", 3); return; }
+    if (!isfinite(f)) { out("nonfinite", 9); return; }
     if (f < 0) { out("-", 1); f = -f; }
+    if (f >= 4294967296.0f) { out("overflow", 8); return; }
     uint32_t scale = 1;
     for (int i = 0; i < prec; i++) scale *= 10;
     uint32_t ip = (uint32_t)f;
@@ -56,7 +58,9 @@ void con_printf(const char *fmt, ...)
         while (*p >= '0' && *p <= '9') width = width * 10 + *p++ - '0';
         if (*p == '.') { p++; prec = 0; while (*p >= '0' && *p <= '9') prec = prec * 10 + *p++ - '0'; }
         switch (*p) {
-        case 'd': { int v = va_arg(ap, int); if (v < 0) { out("-", 1); v = -v; } put_uint(v, 10, width, pad, false); break; }
+        case 'd': { int v = va_arg(ap, int); unsigned u = (unsigned)v;
+            if (v < 0) { out("-", 1); u = 0u - u; }
+            put_uint(u, 10, width, pad, false); break; }
         case 'u': put_uint(va_arg(ap, unsigned), 10, width, pad, false); break;
         case 'x': put_uint(va_arg(ap, unsigned), 16, width, pad, false); break;
         case 'X': put_uint(va_arg(ap, unsigned), 16, width, pad, true); break;
@@ -67,44 +71,6 @@ void con_printf(const char *fmt, ...)
         }
     }
     va_end(ap);
-}
-
-/* ---- minimal number parsing (newlib's strto* would pull in malloc/syscalls) ---- */
-static bool parse_long(const char *s, long *out)
-{
-    bool neg = false; long v = 0; int base = 10, nd = 0;
-    while (*s == ' ') s++;
-    if (*s == '-' || *s == '+') neg = *s++ == '-';
-    if (s[0] == '0' && (s[1] | 0x20) == 'x') { base = 16; s += 2; }
-    for (;; s++, nd++) {
-        int d;
-        if (*s >= '0' && *s <= '9') d = *s - '0';
-        else if (base == 16 && (*s | 0x20) >= 'a' && (*s | 0x20) <= 'f') d = (*s | 0x20) - 'a' + 10;
-        else break;
-        v = v * base + d;
-    }
-    if (!nd || *s) return false;
-    *out = neg ? -v : v;
-    return true;
-}
-
-static bool parse_float(const char *s, float *out)
-{
-    bool neg = false; float v = 0, scale = 1; int nd = 0, ex = 0;
-    if (*s == '-' || *s == '+') neg = *s++ == '-';
-    for (; *s >= '0' && *s <= '9'; s++, nd++) v = v * 10 + (*s - '0');
-    if (*s == '.') for (s++; *s >= '0' && *s <= '9'; s++, nd++) { scale /= 10; v += (*s - '0') * scale; }
-    if ((*s | 0x20) == 'e') {
-        long e; if (!parse_long(s + 1, &e)) return false;
-        /* Past float's range either way: refused, not two billion multiplies (#56.2). */
-        if (e > 60 || e < -60) return false;
-        ex = e; s += strlen(s);
-    }
-    if (!nd || *s) return false;
-    while (ex > 0) { v *= 10; ex--; }
-    while (ex < 0) { v /= 10; ex++; }
-    *out = neg ? -v : v;
-    return true;
 }
 
 static char *next_tok(char **p)
@@ -168,6 +134,39 @@ static const pdesc_t *find_param(const char *name)
     return 0;
 }
 
+static bool store_integer(const pdesc_t *d, int64_t x)
+{
+    switch (d->type) {
+    case PT_BOOL:
+        if (x < 0 || x > 1) return false;
+        *(bool *)d->ptr = x != 0; return true;
+    case PT_ENUM: {
+        int n; enum_for(d, &n);
+        if (x < 0 || x > UINT8_MAX || (n > 0 && x >= n)) return false;
+        *(uint8_t *)d->ptr = (uint8_t)x; return true;
+    }
+    case PT_U8:
+        if (x < 0 || x > UINT8_MAX) return false;
+        *(uint8_t *)d->ptr = (uint8_t)x; return true;
+    case PT_U16:
+        if (x < 0 || x > UINT16_MAX) return false;
+        *(uint16_t *)d->ptr = (uint16_t)x; return true;
+    case PT_U32:
+        if (x < 0 || x > UINT32_MAX) return false;
+        *(uint32_t *)d->ptr = (uint32_t)x; return true;
+    case PT_I8:
+        if (x < INT8_MIN || x > INT8_MAX) return false;
+        *(int8_t *)d->ptr = (int8_t)x; return true;
+    case PT_I16:
+        if (x < INT16_MIN || x > INT16_MAX) return false;
+        *(int16_t *)d->ptr = (int16_t)x; return true;
+    case PT_I32:
+        if (x < INT32_MIN || x > INT32_MAX) return false;
+        *(int32_t *)d->ptr = (int32_t)x; return true;
+    default: return false;
+    }
+}
+
 static bool set_value(const pdesc_t *d, const char *v)
 {
     if (d->type == PT_FLOAT) {
@@ -181,22 +180,16 @@ static bool set_value(const pdesc_t *d, const char *v)
         ((char *)d->ptr)[d->size - 1] = 0;
         return true;
     }
-    long x;
+    int64_t x;
     if (d->type == PT_BOOL && (!strcmp(v, "true") || !strcmp(v, "false"))) x = v[0] == 't';
     else if (d->type == PT_ENUM && !(v[0] >= '0' && v[0] <= '9')) {
         int n; const char *const *names = enum_for(d, &n);
         for (x = 0; x < n && strcmp(names[x], v); x++) {}
         if (x == n) return false;
-    } else if (!parse_long(v, &x)) {
+    } else if (!parse_integer(v, &x)) {
         return false;
     }
-    switch (d->size) {
-    case 1: *(uint8_t *)d->ptr = x; break;
-    case 2: *(uint16_t *)d->ptr = x; break;
-    case 4: *(uint32_t *)d->ptr = x; break;
-    default: return false;
-    }
-    return true;
+    return store_integer(d, x);
 }
 
 /* Shared with the UART console (Bluetooth chip types stock commands there). */
@@ -222,12 +215,16 @@ bool console_param_format(const char *name, char *out, unsigned len)
     case PT_I8:     v = *(int8_t *)d->ptr; sgn = true; break;
     case PT_I16:    v = *(int16_t *)d->ptr; sgn = true; break;
     case PT_I32:    v = *(int32_t *)d->ptr; sgn = true; break;
-    case PT_FLOAT:  v = (long)(*(float *)d->ptr * 1000.0f); sgn = true; break;  /* rough */
+    case PT_FLOAT: {
+        const double scaled = (double)*(float *)d->ptr * 1000.0;
+        if (!isfinite(scaled) || scaled < LONG_MIN || scaled > LONG_MAX) return false;
+        v = (long)scaled; sgn = true; break;  /* rough */
+    }
     default: return false;
     }
     char tmp[16]; int n = 0; unsigned long u;
     bool neg = sgn && v < 0;
-    u = neg ? (unsigned long)-v : (unsigned long)v;
+    u = neg ? 0ul - (unsigned long)v : (unsigned long)v;
     if (d->type == PT_U32) u = *(uint32_t *)d->ptr;
     do { tmp[n++] = '0' + u % 10; u /= 10; } while (u);
     int o = 0;
