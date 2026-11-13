@@ -48,12 +48,21 @@ std::string GlbFile(const json& j, size_t binBytes) {
   return file;
 }
 
+json Animation(int output) {
+  json animation;
+  animation["samplers"] = json::array();
+  animation["samplers"].push_back({{"input", 0}, {"output", output}});
+  json channel = {{"sampler", 0}};
+  channel["target"] = {{"node", 1}, {"path", "translation"}};
+  animation["channels"] = json::array({channel});
+  return json::array({animation});
+}
+
 TEST(GlbBounds, SkeletonLoaderRejectsMalformedAccessorWithoutInstalledValveAssets) {
   json j = Document();
   j["nodes"] = json::array();
   for (int i = 0; i < 32; ++i) j["nodes"].push_back({{"name", i == 1 ? "REF:Root" : "bone"}});
-  j["animations"] = {{{"samplers", {{{"input", 0}, {"output", 0}}}},
-                        {"channels", {{{"sampler", 0}, {"target", {{"node", 1}, {"path", "translation"}}}}}}};
+  j["animations"] = Animation(0);
   j["bufferViews"][0]["byteOffset"] = UINT64_MAX - 3;
   lh::files::StagingDirectory temp(std::filesystem::temp_directory_path());
   lh::files::AtomicWrite(temp.Payload(), GlbFile(j, 24));
@@ -71,8 +80,7 @@ TEST(GlbBounds, LoadsFiniteSyntheticAnimationAndRejectsTruncatedBin) {
                       {{"buffer", 0}, {"byteOffset", 152}, {"byteLength", 456}}};
   j["accessors"] = {{{"bufferView", 0}, {"componentType", 5126}, {"type", "SCALAR"}, {"count", 38}},
                     {{"bufferView", 1}, {"componentType", 5126}, {"type", "VEC3"}, {"count", 38}}};
-  j["animations"] = {{{"samplers", {{{"input", 0}, {"output", 1}}}},
-                      {"channels", {{{"sampler", 0}, {"target", {{"node", 1}, {"path", "translation"}}}}}}};
+  j["animations"] = Animation(1);
   lh::files::StagingDirectory temp(std::filesystem::temp_directory_path());
   auto bytes = GlbFile(j, 608);
   lh::files::AtomicWrite(temp.Payload(), bytes);
