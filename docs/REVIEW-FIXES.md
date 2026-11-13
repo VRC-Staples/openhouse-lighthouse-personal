@@ -13,12 +13,15 @@ The source changes do not explain Elastic's detection or establish a different a
 | V1 | Pose and settings validation use JSON references before accepting values. Unknown nested fields are not copied. | A 60,000-level pose and 30,000-level settings values exercise rejection and transactional loading. |
 | V2 | Log normalization scans each hexadecimal-looking run once. | Matching examples, 5,000 bounded comparisons against the previous behavior, and 250,000-character unchanged runs. |
 | V3 | Map labels reject nonfinite, out-of-range, and off-screen coordinates before text rendering. | The reported projection above `INT32_MAX`, a normal label, and a nonfinite position. |
-| L1 | The viewer restricts default DLL searches to System32 before GLFW starts. MSVC also sets `/DEPENDENTLOADFLAG:0x800` for static imports. | A harmless DLL fixture tests application-directory, current-directory, and PATH exclusion. Windows CI tests a hidden GLFW/OpenGL context. Both packagers require the PE flag. |
+| L1 | The viewer restricts default DLL searches to System32 before GLFW starts. MSVC also sets `/DEPENDENTLOADFLAG:0x800` for static imports. | A harmless DLL fixture tests application-directory, current-directory, and PATH exclusion. Windows CI compares baseline and hardened GLFW startup. Both packagers require the PE flag. |
 
 The static-import restriction requires Windows 10 version 1607 or later. The supported package
 uses the pinned MSVC CI. Legacy cross-packaging refuses a viewer without the same loader flag.
 Explicit DLL paths remain supported. The viewer does not modify system-wide security settings.
-The hidden graphics test does not establish compatibility with every vendor graphics driver.
+The startup test requires native windows in both modes. It compares OpenGL context creation separately.
+If both modes report GLFW's specific no-OpenGL error, the test records rendering as unvalidated.
+A baseline success followed by a hardened failure fails the test. Other unexpected errors also fail.
+This comparison does not establish compatibility with every vendor graphics driver.
 
 ### Runtime and reports
 

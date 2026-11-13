@@ -52,6 +52,7 @@ Run $binary @('version', '--disable-metrics')
 $build = "$repo/build-ci"
 $triplet = 'x64-windows-static-release'
 Run python @('scripts/tests/test_package_windows.py')
+Run python @('scripts/tests/check-viewer-startup.py', '--self-test')
 Run cmake @('-P', 'scripts/tests/check-triplet.cmake')
 Run cmake @('-P', 'scripts/tests/check-package-dependencies.cmake')
 Run cmake @('-S', '.', '-B', $build, '-G', 'Ninja', '-DCMAKE_BUILD_TYPE=Release',
@@ -61,6 +62,7 @@ Run cmake @('-S', '.', '-B', $build, '-G', 'Ninja', '-DCMAKE_BUILD_TYPE=Release'
 Run cmake @('--build', $build, '--parallel', '2', '--', '-k', '0')
 Run ctest @('--test-dir', $build, '--output-on-failure', '--timeout', '180',
     '--output-junit', "$build/ctest-results.xml")
+Run ctest @('--test-dir', $build, '-V', '-R', '^viewer_startup$')
 Run "$build/lh_openvr_component_tests.exe" @('--gtest_filter=GlbBounds.*:ReportTransactions.*:ReportLimits.*:ReportNames.*:SteamRoomMetadata.*:Viewer*.*')
 Run "$build/lh_unit_tests.exe" @('--gtest_filter=PlatformReview.*:ReceiverLifecycle.*:TrackerPlacement.*')
 Run "$build/lh_runtime_tests.exe" @('--gtest_filter=MappedBounds.*:DeviceSetup.*:ReplayLifecycle.*')

@@ -66,8 +66,10 @@ Explicit trusted paths remain supported for dependencies that need them.
 
 This restriction belongs to the viewer process, not the SteamVR host. It does not change global
 security settings, remove clipboard or input features, or disable same-user peer authorization.
-The controlled loader test uses a harmless DLL. The graphics test creates a hidden GLFW/OpenGL window
-on the CI runner. Neither test certifies every GPU driver or explains antivirus classification.
+The controlled loader test uses a harmless DLL. The startup test compares baseline and hardened
+processes on the same runner. Both must create a hidden native window. OpenGL rendering is unvalidated
+when both processes report GLFW's specific no-OpenGL error. Any other failure or changed outcome fails
+the comparison. Neither test certifies every GPU driver or explains antivirus classification.
 
 ## Verification
 
