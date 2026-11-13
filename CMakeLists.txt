@@ -328,6 +328,7 @@ if(LH_BUILD_TESTS)
   target_link_libraries(lh_zlib_compatibility_tests PRIVATE ZLIB::ZLIB)
   add_test(NAME zlib_compatibility COMMAND lh_zlib_compatibility_tests)
   find_package(GTest REQUIRED)
+  include(cmake/viewer-interaction-tests.cmake)
   add_executable(lh_unit_tests
     tests/unit/test_platform.cpp tests/unit/test_review_platform.cpp
     tests/unit/test_tracking_source.cpp
@@ -360,8 +361,11 @@ if(LH_BUILD_TESTS)
     add_executable(lh_openvr_component_tests tests/openvr/test_components.cpp
       tests/openvr/test_personal_boundaries.cpp tests/openvr/test_viewer_guards.cpp
       tests/openvr/test_zip_writer.cpp tests/openvr/test_glb_bounds.cpp tests/openvr/test_room_metadata.cpp
+      tests/openvr/test_pairing_mailbox.cpp tests/openvr/test_pairing_input.cpp
       apps/openhouse-viewer/telemetry_client.cpp
-      src/openvr/hand_skeleton.cpp src/openvr/raw_alignment.cpp src/openvr/steam_rooms.cpp src/openvr/room_publisher.cpp src/openvr/host_frame.cpp src/openvr/telemetry_server.cpp)
+      src/openvr/hand_skeleton.cpp src/openvr/raw_alignment.cpp src/openvr/steam_rooms.cpp
+      src/openvr/room_publisher.cpp src/openvr/host_frame.cpp src/openvr/telemetry_server.cpp
+      src/openvr/pairing_mailbox.cpp)
     target_include_directories(lh_openvr_component_tests PRIVATE src tests
       apps/openhouse-viewer ${OPENVR_INCLUDE_DIR})
     target_compile_definitions(lh_openvr_component_tests PRIVATE LH_SOURCE_DIR="${CMAKE_SOURCE_DIR}")

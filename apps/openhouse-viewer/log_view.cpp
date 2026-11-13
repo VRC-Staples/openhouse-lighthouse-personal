@@ -4,6 +4,7 @@
 #include <cctype>
 #include <cstdio>
 #include <imgui.h>
+#include <optional>
 #include <vector>
 
 namespace openhouse::viewer {
@@ -22,6 +23,30 @@ std::string Lower(std::string s) {
   std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) { return char(std::tolower(c)); });
   return s;
 }
+
+std::vector<const LogLine*> ShownLogs(const TelemetryClient& client, const LogFilter& filter,
+                                     std::optional<uint64_t> pausedAt) {
+  const auto& logs = client.Logs();
+  size_t end = logs.size();
+  if (pausedAt) {
+    const uint64_t first = client.LogsReceived() - logs.size();
+    end = *pausedAt <= first ? 0 : size_t(std::min<uint64_t>(*pausedAt - first, logs.size()));
+  }
+  std::vector<const LogLine*> shown;
+  shown.reserve(end);
+  for (size_t i = 0; i < end; ++i)
+    if (filter.Shows(logs[i])) shown.push_back(&logs[i]);
+  return shown;
+}
+
+// ImGui labels interpret ##/###. Keep the item ID separate from literal message text.
+bool LiteralSelectable(const char* id, const std::string& text, ImGuiSelectableFlags flags = 0) {
+  const ImVec2 pos = ImGui::GetCursorScreenPos();
+  const ImVec2 size = ImGui::CalcTextSize(text.c_str(), nullptr, false);
+  const bool clicked = ImGui::Selectable(id, false, flags, size);
+  ImGui::GetWindowDrawList()->AddText(pos, ImGui::GetColorU32(ImGuiCol_Text), text.c_str());
+  return clicked;  // AddText leaves the selectable as the last item for its context menu.
+}
 }  // namespace
 
 bool LogFilter::Shows(const LogLine& line) const {
@@ -39,7 +64,7 @@ bool LogFilter::Shows(const LogLine& line) const {
   return true;
 }
 
-void LogView::Draw(TelemetryClient& client) {
+bool LogView::DrawControls(TelemetryClient& client) {
   int counts[4] = {};
   for (const auto& l : client.Logs()) ++counts[int(l.level)];
   char label[48];
@@ -60,7 +85,6 @@ void LogView::Draw(TelemetryClient& client) {
   ImGui::Checkbox("Hide multi-station chatter", &filter_.hideMulti);
   ImGui::SameLine();
   ImGui::Checkbox("Hide 2.0 light chatter", &filter_.hideLh2);
-
   ImGui::SetNextItemWidth(240);
   if (ImGui::InputTextWithHint("##search", "Search messages or serials", search_, sizeof search_)) filter_.text = Lower(search_);
   ImGui::SameLine();
@@ -70,40 +94,31 @@ void LogView::Draw(TelemetryClient& client) {
   ImGui::SameLine();
   if (ImGui::Button("Clear")) { client.ClearLogs(); pausedAt_ = client.LogsReceived(); }
   ImGui::SameLine();
-  if (ImGui::Button("Copy shown")) {
-    std::string all;
-    for (const auto& l : client.Logs())
-      if (filter_.Shows(l)) all += std::string("[") + lh::LogLevelName(l.level) + "] " + l.text + "\n";
-    ImGui::SetClipboardText(all.c_str());
-  }
-  if (!filter_.hidden.empty()) {
-    ImGui::SameLine();
-    std::snprintf(label, sizeof label, "Hidden kinds (%zu)", filter_.hidden.size());
-    if (ImGui::Button(label)) ImGui::OpenPopup("hidden");
-    if (ImGui::BeginPopup("hidden")) {
-      ImGui::TextDisabled("Click one to show it again");
-      for (auto it = filter_.hidden.begin(); it != filter_.hidden.end();) {
-        if (ImGui::Selectable(it->c_str())) it = filter_.hidden.erase(it);
-        else ++it;
-      }
-      if (ImGui::Button("Show all again")) filter_.hidden.clear();
-      ImGui::EndPopup();
-    }
-  }
+  return ImGui::Button("Copy shown");
+}
 
-  ImGui::BeginChild("lines", ImVec2(0, 0), ImGuiChildFlags_Borders, ImGuiWindowFlags_HorizontalScrollbar);
-  const auto& logs = client.Logs();
-  // Paused: the lines received up to then that are still stored. An index would slide to newer
-  // lines once the log is full and drops its oldest (#54.2).
-  size_t end = logs.size();
-  if (paused_) {
-    const uint64_t first = client.LogsReceived() - logs.size();  // running number of logs[0]
-    end = pausedAt_ <= first ? 0 : size_t(std::min<uint64_t>(pausedAt_ - first, logs.size()));
+void LogView::DrawHiddenKinds() {
+  if (filter_.hidden.empty()) return;
+  ImGui::SameLine();
+  char label[48];
+  std::snprintf(label, sizeof label, "Hidden kinds (%zu)", filter_.hidden.size());
+  if (ImGui::Button(label)) ImGui::OpenPopup("hidden");
+  if (ImGui::BeginPopup("hidden")) {
+    ImGui::TextDisabled("Click one to show it again");
+    for (auto it = filter_.hidden.begin(); it != filter_.hidden.end();) {
+      ImGui::PushID(static_cast<const void*>(&*it));
+      const bool clicked = LiteralSelectable("##kind", *it);
+      ImGui::PopID();
+      if (clicked) it = filter_.hidden.erase(it);
+      else ++it;
+    }
+    if (ImGui::Button("Show all again")) filter_.hidden.clear();
+    ImGui::EndPopup();
   }
-  std::vector<const LogLine*> shown;
-  shown.reserve(end);
-  for (size_t i = 0; i < end; ++i)
-    if (filter_.Shows(logs[i])) shown.push_back(&logs[i]);
+}
+
+void LogView::DrawLines(const std::vector<const LogLine*>& shown) {
+  ImGui::BeginChild("lines", ImVec2(0, 0), ImGuiChildFlags_Borders, ImGuiWindowFlags_HorizontalScrollbar);
   ImGuiListClipper clipper;
   clipper.Begin(int(shown.size()));
   while (clipper.Step()) {
@@ -112,7 +127,7 @@ void LogView::Draw(TelemetryClient& client) {
       ImGui::PushID(i);
       ImGui::TextColored(LevelColor(l.level), "%-5s", lh::LogLevelName(l.level));
       ImGui::SameLine();
-      ImGui::Selectable(l.text.c_str(), false, ImGuiSelectableFlags_AllowOverlap);
+      LiteralSelectable("##line", l.text, ImGuiSelectableFlags_AllowOverlap);
       if (ImGui::BeginPopupContextItem("line")) {
         if (ImGui::MenuItem("Hide messages like this")) filter_.hidden.insert(LogFilter::Shape(l.text));
         if (ImGui::MenuItem("Copy")) ImGui::SetClipboardText(l.text.c_str());
@@ -123,6 +138,19 @@ void LogView::Draw(TelemetryClient& client) {
   }
   if (autoScroll_ && !paused_ && ImGui::GetScrollY() >= ImGui::GetScrollMaxY() - 40) ImGui::SetScrollHereY(1.0f);
   ImGui::EndChild();
+}
+
+void LogView::Draw(TelemetryClient& client) {
+  const bool copy = DrawControls(client);
+  DrawHiddenKinds();
+  const auto shown = ShownLogs(client, filter_, paused_ ? std::optional(pausedAt_) : std::nullopt);
+  if (copy) {
+    std::string text;
+    for (const auto* line : shown)
+      text += std::string("[") + lh::LogLevelName(line->level) + "] " + line->text + "\n";
+    ImGui::SetClipboardText(text.c_str());
+  }
+  DrawLines(shown);
 }
 
 }  // namespace openhouse::viewer

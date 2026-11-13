@@ -14,8 +14,13 @@ constexpr Socket kInvalid = -1;
 Socket ListenLoopback(int port, std::string* error = nullptr);
 // A pending connection, non-blocking, or kInvalid when there is none.
 Socket Accept(Socket listener);
-// A blocking connect to 127.0.0.1:port (the caller retries), then non-blocking.
+// Legacy synchronous helper; not for UI polling. Connected peers are non-blocking.
 Socket ConnectLoopback(int port);
+// Begin without waiting. The caller owns the socket, including while pending.
+Socket BeginConnectLoopback(int port);
+enum class ConnectResult { Pending, Connected, Failed };
+// Zero-timeout readiness check. Connected includes Windows same-user authorization.
+ConnectResult PollConnect(Socket socket);
 // Bytes sent (0: would block), or -1 when the peer is gone.
 long SendSome(Socket socket, const char* data, std::size_t size);
 // Bytes read, 0 when nothing is waiting, or -1 when the peer closed or failed.

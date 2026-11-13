@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 #include <algorithm>
-#include <sstream>
+#include <istream>
+#include <streambuf>
 #include <set>
 #include <thread>
 #include <vector>

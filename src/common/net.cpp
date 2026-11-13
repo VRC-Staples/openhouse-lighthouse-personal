@@ -11,6 +11,7 @@
 #include <netinet/in.h>
 #include <netinet/tcp.h>
 #include <sys/socket.h>
+#include <sys/select.h>
 #include <unistd.h>
 #endif
 
@@ -96,6 +97,55 @@ Socket ConnectLoopback(int port) {
   if (!NonBlocking(s)) { Close(s); return kInvalid; }
   NoDelay(s);
   return s;
+}
+
+Socket BeginConnectLoopback(int port) {
+  if (port < 1 || port > 65535 || !Started()) return kInvalid;
+  const Socket s = Socket(socket(AF_INET, SOCK_STREAM, 0));
+  if (s == kInvalid) return kInvalid;
+  if (!NonBlocking(s)) { Close(s); return kInvalid; }
+  const sockaddr_in a = Loopback(port);
+  if (connect(s, reinterpret_cast<const sockaddr*>(&a), sizeof a) != 0) {
+#ifdef _WIN32
+    const int error = WSAGetLastError();
+    const bool pending = error == WSAEWOULDBLOCK || error == WSAEINPROGRESS;
+#else
+    const bool pending = errno == EINPROGRESS || WouldBlock();
+#endif
+    if (!pending) { Close(s); return kInvalid; }
+  }
+  return s;
+}
+
+ConnectResult PollConnect(Socket socket) {
+  if (socket == kInvalid) return ConnectResult::Failed;
+#ifndef _WIN32
+  // POSIX FD_SET indexes by descriptor; reject values outside its fixed storage.
+  if (socket < 0 || socket >= FD_SETSIZE) return ConnectResult::Failed;
+#endif
+  fd_set writable, failed;
+  FD_ZERO(&writable);
+  FD_ZERO(&failed);
+  FD_SET(socket, &writable);
+  FD_SET(socket, &failed);
+  timeval timeout{};  // Never wait on the caller's UI thread.
+#ifdef _WIN32
+  const int ready = select(0, nullptr, &writable, &failed, &timeout);
+  int length = sizeof(int);
+#else
+  const int ready = select(int(socket) + 1, nullptr, &writable, &failed, &timeout);
+  socklen_t length = sizeof(int);
+#endif
+  if (ready < 0) return ConnectResult::Failed;
+  if (ready == 0) return ConnectResult::Pending;
+  int error = 0;
+  if (getsockopt(socket, SOL_SOCKET, SO_ERROR, reinterpret_cast<char*>(&error), &length) != 0 || error != 0)
+    return ConnectResult::Failed;
+#ifdef _WIN32
+  if (!SameUserPeer(SOCKET(socket))) return ConnectResult::Failed;
+#endif
+  NoDelay(socket);
+  return ConnectResult::Connected;
 }
 
 long SendSome(Socket socket, const char* data, std::size_t size) {

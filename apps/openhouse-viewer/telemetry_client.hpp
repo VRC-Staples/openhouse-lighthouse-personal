@@ -57,7 +57,8 @@ class TelemetryClient {
   explicit TelemetryClient(int port) : port_(port) {}
   ~TelemetryClient() { net::Close(socket_); }
 
-  // Connects (retrying every second), reads what arrived, parses it. Call per frame.
+  // Advances a nonblocking TCP attempt (2 s deadline, 1 s retry delay), then reads
+  // and parses available telemetry. Call per frame; pending peers are never read.
   void Poll(double now);
 
   bool Connected() const { return socket_ != net::kInvalid && helloed_; }
@@ -75,12 +76,14 @@ class TelemetryClient {
   static constexpr std::size_t kMaxLogBytes = 4u << 20;
 
  private:
+  bool Ready(double now);
   void Handle(const std::string& line);
   void Disconnect();
 
   int port_;
   net::Socket socket_ = net::kInvalid;
-  double nextAttempt_ = 0;
+  double nextAttempt_ = 0, connectDeadline_ = 0;
+  bool connecting_ = false;
   std::string buffer_, host_, version_;
   int pid_ = 0;
   bool helloed_ = false, haveState_ = false;

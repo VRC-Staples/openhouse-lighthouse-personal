@@ -19,6 +19,7 @@
 #include <string>
 #include <vector>
 
+#include <nlohmann/json_fwd.hpp>
 #include <openvr_driver.h>
 
 namespace lh { class Session; }
@@ -26,7 +27,7 @@ namespace lh { class Session; }
 namespace lh::openvr {
 
 // IVRMailbox_002 as the stock driver calls it (vrmailbox.cpp; not in the public headers).
-// Slot 1 (unregister) is never called by it; kept for the vtable layout.
+// Slot 1 unregisters a mailbox; the stock driver does not call it.
 class IVRMailbox {
  public:
   virtual int RegisterMailbox(const char* name, uint64_t* handle, char* address, uint32_t addressSize) = 0;
@@ -72,6 +73,9 @@ class PairingMailbox {
     bool haveMessageId = false, sendStatus = false, sawEmpty = false;
     double deadline = 0;
   };
+  bool Register();
+  bool Read(std::string& text);
+  void StartPairing(Session& session, const nlohmann::json& message, const std::string& expected);
   void Reply(const std::string& address, const std::string& json);
   std::string Discover(Session& session, const std::string& expected, const std::string* messageId) const;
   void Finish(Session& session, const std::string& result, const std::string& connected, const std::string& expected);
@@ -80,7 +84,8 @@ class PairingMailbox {
   uint64_t handle_ = 0;
   LogFn log_ = nullptr;
   std::optional<Pairing> pairing_;
-  std::vector<char> buffer_ = std::vector<char>(16384);
+  // Fixed budget includes the NUL. Never allocate from a host-reported length.
+  std::vector<char> buffer_ = std::vector<char>(64 * 1024);
 };
 
 }  // namespace lh::openvr

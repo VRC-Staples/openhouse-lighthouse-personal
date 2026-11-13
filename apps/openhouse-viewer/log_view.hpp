@@ -28,6 +28,10 @@ class LogView {
   LogFilter& Filter() { return filter_; }
 
  private:
+  bool DrawControls(TelemetryClient& client);
+  void DrawHiddenKinds();
+  void DrawLines(const std::vector<const LogLine*>& shown);
+
   LogFilter filter_;
   bool autoScroll_ = true, paused_ = false;
   uint64_t pausedAt_ = 0;  // lines received when paused (a running total: the log drops old lines)

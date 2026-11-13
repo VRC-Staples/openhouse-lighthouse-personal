@@ -104,6 +104,7 @@ State ReadState(const json& j) {
 void TelemetryClient::Disconnect() {
   net::Close(socket_);
   socket_ = net::kInvalid;
+  connecting_ = false;
   helloed_ = haveState_ = false;
   buffer_.clear();
   host_.clear();
@@ -112,13 +113,29 @@ void TelemetryClient::Disconnect() {
   state_ = {};
 }
 
-void TelemetryClient::Poll(double now) {
+bool TelemetryClient::Ready(double now) {
   if (socket_ == net::kInvalid) {
-    if (now < nextAttempt_) return;
+    if (now < nextAttempt_) return false;
     nextAttempt_ = now + 1.0;
-    socket_ = net::ConnectLoopback(port_);
-    if (socket_ == net::kInvalid) return;
+    socket_ = net::BeginConnectLoopback(port_);
+    if (socket_ == net::kInvalid) return false;
+    connecting_ = true;
+    connectDeadline_ = now + 2.0;
   }
+  if (!connecting_) return true;
+  const auto result = now >= connectDeadline_ ? net::ConnectResult::Failed : net::PollConnect(socket_);
+  if (result == net::ConnectResult::Pending) return false;
+  if (result == net::ConnectResult::Failed) {
+    Disconnect();
+    nextAttempt_ = now + 1.0;
+    return false;
+  }
+  connecting_ = false;  // TCP completion and same-user authorization both passed.
+  return true;
+}
+
+void TelemetryClient::Poll(double now) {
+  if (!Ready(now)) return;
   char chunk[16 * 1024];
   // Bound incoming work to 64 KiB per UI frame, even when a peer keeps sending.
   for (int i = 0; i < 4; ++i) {
