@@ -74,6 +74,35 @@ TEST(DeviceSetup, FailedReplacementPreservesConfigurationAndRetries) {
 }
 
 #ifdef LH_TEST_USB
+TEST(ReplayLifecycle, ReportsCorruptionAndClearsErrorOnRestart) {
+  lh::files::StagingDirectory temp(std::filesystem::temp_directory_path());
+  lh::files::AtomicWrite(temp.Payload(), std::string("LHRAW001") + char(0xff));
+  lh::SessionOptions options;
+  options.replayPath = temp.Payload().string();
+  options.replayRealtime = false;
+  options.saveRoomMap = false;
+  options.preinitDirectory = options.steamDatabasePath = "-";
+  auto session = lh::Session::Create(options);
+  for (bool corrupt : {true, false}) {
+    if (!corrupt) lh::files::AtomicWrite(temp.Payload(), "LHRAW001");
+    std::string error;
+    ASSERT_TRUE(session->Start(&error)) << error;
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    while (!session->Finished() && std::chrono::steady_clock::now() < deadline)
+      std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    ASSERT_TRUE(session->Finished());
+    session->Stop();
+    EXPECT_EQ(!session->ReplayError().empty(), corrupt);
+    if (corrupt) {
+      bool reported = false;
+      for (const auto& event : session->PollEvents())
+        reported |= event.level == lh::LogLevel::Error &&
+                    event.text.find("corrupt or unreadable") != std::string::npos;
+      EXPECT_TRUE(reported);
+    }
+  }
+}
+
 TEST(ReplayLifecycle, StopInterruptsLongRecordedGaps) {
   lh::files::StagingDirectory temp(std::filesystem::temp_directory_path());
   {
@@ -97,6 +126,7 @@ TEST(ReplayLifecycle, StopInterruptsLongRecordedGaps) {
   ASSERT_GE(session->HostNow(), 1);
   const auto start = std::chrono::steady_clock::now();
   session->Stop();
+  EXPECT_TRUE(session->ReplayError().empty());
   EXPECT_LT(std::chrono::steady_clock::now() - start, std::chrono::milliseconds(500));
   lh::usb::RawCaptureReader reader;
   ASSERT_TRUE(reader.Open(temp.Payload().string()));

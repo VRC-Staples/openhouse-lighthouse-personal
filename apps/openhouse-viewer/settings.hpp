@@ -24,7 +24,8 @@ struct Settings {
       const auto j = nlohmann::json::parse(bytes);
       if (!j.is_object()) return false;
       const auto nextDetail = j.value("advanced", false) ? Detail::Advanced : Detail::Basic;
-      const auto logs = j.value("logs", nlohmann::json::object());
+      const auto emptyObject = nlohmann::json::object();
+      const auto& logs = j.contains("logs") ? j.at("logs") : emptyObject;
       LogFilter next;
       next.info = logs.value("info", true);
       next.warn = logs.value("warn", true);
@@ -32,7 +33,8 @@ struct Settings {
       next.debug = logs.value("debug", false);
       next.hideMulti = logs.value("hideMulti", true);
       next.hideLh2 = logs.value("hideLh2", true);
-      const auto hidden = logs.value("hidden", nlohmann::json::array());
+      const auto emptyArray = nlohmann::json::array();
+      const auto& hidden = logs.contains("hidden") ? logs.at("hidden") : emptyArray;
       if (!hidden.is_array()) return false;
       for (const auto& item : hidden) {
         if (!item.is_string()) return false;

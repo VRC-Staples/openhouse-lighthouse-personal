@@ -24,26 +24,6 @@ std::string Lower(std::string s) {
 }
 }  // namespace
 
-std::string LogFilter::Shape(const std::string& text) {
-  std::string out;
-  for (size_t i = 0; i < text.size();) {
-    const unsigned char c = static_cast<unsigned char>(text[i]);
-    // A token of hex digits that has a digit in it (serials, numbers, times): '#'.
-    size_t j = i;
-    bool digit = false;
-    while (j < text.size() && (std::isxdigit(static_cast<unsigned char>(text[j])) || text[j] == '.')) {
-      digit |= std::isdigit(static_cast<unsigned char>(text[j])) != 0;
-      ++j;
-    }
-    const bool wordStart = i == 0 || !std::isalnum(static_cast<unsigned char>(text[i - 1]));
-    const bool wordEnd = j == text.size() || !std::isalnum(static_cast<unsigned char>(text[j]));
-    if (j > i && digit && wordStart && wordEnd) { out += '#'; i = j; continue; }
-    out += char(c);
-    ++i;
-  }
-  return out;
-}
-
 bool LogFilter::Shows(const LogLine& line) const {
   switch (line.level) {
     case lh::LogLevel::Debug: if (!debug) return false; break;

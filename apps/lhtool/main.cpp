@@ -401,6 +401,8 @@ int SessionCommand(int argc, char** argv) {
   }
   emit();
   session->Stop();
+  error = session->ReplayError();
+  if (!error.empty()) { fprintf(stderr, "lhtool: %s\n", error.c_str()); return 1; }
   return 0;
 }
 

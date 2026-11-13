@@ -10,6 +10,7 @@
 #include <stdexcept>
 
 #include "lighthouse_direct.hpp"
+#include "base_placement.hpp"
 #include "tracking_source.hpp"
 
 namespace lh {
@@ -275,7 +276,8 @@ bool Tracker::LoadBasePoses(const std::string& text, std::string* error) {
         for (const auto& b : universes.at(0).at("base_stations")) {
           const auto& target = b.at("target_pose");
           if (target.value("target_serial_number", 0u) != 0) continue;
-          placements[b.at("base_serial_number").get<uint32_t>()] = ReadPose(target.at("pose"));
+          // SteamVR stores base-from-global; tracking consumes world-from-base.
+          placements[b.at("base_serial_number").get<uint32_t>()] = tracking::WorldFromSteamBase(ReadPose(target.at("pose")));
         }
       }
       for (const auto& b : j.at("base_stations")) {

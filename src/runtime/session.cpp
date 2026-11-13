@@ -192,6 +192,10 @@ class SessionImpl final : public Session, public InputSinkBase {
   void Stop() override;
   bool Running() const override { return running_; }
   bool Finished() const override { return finished_; }
+  std::string ReplayError() const override {
+    std::lock_guard lock(mutex_);
+    return replayError_;
+  }
   SessionSnapshot Snapshot() const override;
   std::vector<DeviceUpdate> Updates() const override;
   double HostNow() const override {
@@ -351,6 +355,7 @@ class SessionImpl final : public Session, public InputSinkBase {
   void WatchRoomFile(bool now = false);
   uint64_t RoomResets() const override { std::lock_guard lock(mutex_); return roomResets_; }
   void ReplayMain();
+  void FinishReplay(const std::string& error);
   DevicePose MakePose(const Device& d) const;
   double HostTime(const Device& d, double deviceTime) const { return deviceTime + d.clockOffset; }
 
@@ -385,6 +390,7 @@ class SessionImpl final : public Session, public InputSinkBase {
   std::deque<SessionEvent> events_;
   mutable double now_ = 0;  // latest host time seen (live: steady clock)
   double lastSave_ = 0;
+  std::string replayError_;
   std::atomic<bool> running_{false}, finished_{false}, stop_{false};
   std::atomic<bool> warming_{false};  // replay: before the window
   std::thread replay_;
@@ -443,6 +449,7 @@ bool SessionImpl::Start(std::string* error) {
   else if (!replay) LoadLearnedImu(platform::SteamConfigDirectory() + "/lighthousedb.json");
   {
     std::lock_guard lock(mutex_);
+    replayError_.clear();
     for (const auto& [serial, c] : room_.KnownConfigs()) {
       bases_[serial] = {c.first, c.second, false};
       const auto frame = room_.OotxFrames().find(serial);
@@ -551,14 +558,21 @@ void SessionImpl::Stop() {
   running_ = false;
 }
 
+void SessionImpl::FinishReplay(const std::string& error) {
+  {
+    std::lock_guard lock(mutex_);
+    replayError_ = error;
+    if (!error.empty()) Emit(SessionEventType::Log, "", error, LogLevel::Error);
+  }
+  finished_ = true;
+}
+
 void SessionImpl::ReplayMain() {
 #ifdef LH_RUNTIME_USB
   usb::ReportDecoder decoder(this);
   usb::RawCaptureReader reader;
   if (!reader.Open(options_.replayPath)) {
-    std::lock_guard lock(mutex_);
-    Emit(SessionEventType::Log, "", "cannot open capture " + options_.replayPath);
-    finished_ = true;
+    FinishReplay("cannot open capture " + options_.replayPath);
     return;
   }
   double firstHost = 0, wallStart = 0, captureStart = -1;
@@ -568,7 +582,7 @@ void SessionImpl::ReplayMain() {
   double nextTrace = 0;
   size_t nextSwitch = 0;  // replayMixedSwitch
   const auto& only = options_.replayOnly;
-  reader.ReadAll([&](const usb::EndpointInfo& e) {
+  const bool ok = reader.ReadAll([&](const usb::EndpointInfo& e) {
                    if (!only.empty() && std::find(only.begin(), only.end(), e.serial) == only.end()) { skipped.insert(e.ep); return; }
                    decoder.AddEndpoint(e);
                  },
@@ -623,7 +637,7 @@ void SessionImpl::ReplayMain() {
                    }
                  }, [&] { return stop_.load(); });
   if (trace) std::fclose(trace);
-  finished_ = true;
+  FinishReplay(ok ? "" : "capture is corrupt or unreadable: " + options_.replayPath);
 #endif
 }
 

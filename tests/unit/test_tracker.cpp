@@ -3,6 +3,7 @@
 #include <nlohmann/json.hpp>
 #include "lh/tracker.hpp"
 #include "tracking/lighthouse_direct.hpp"
+#include "tracking/base_placement.hpp"
 #include "tracking/lighthouse_model.hpp"
 
 namespace {
@@ -152,6 +153,18 @@ TEST(TrackerSession, ConfigLifecycleAndDatabaseValidation) {
   EXPECT_TRUE(tracker.PollPoses().empty());
   tracker.OnDeviceAttached("A", Config());
   EXPECT_TRUE(tracker.Devices()[0].configured);
+}
+
+TEST(TrackerPlacement, InvertsSteamTranslationAndRotation) {
+  const auto translated = lh::tracking::WorldFromSteamBase({{1, 2, 3}, {1, 0, 0, 0}});
+  EXPECT_EQ(translated.position, (std::array<double, 3>{-1, -2, -3}));
+  const double c = std::sqrt(0.5);
+  const auto rotated = lh::tracking::WorldFromSteamBase({{1, 2, 3}, {c, 0, 0, c}});
+  EXPECT_NEAR(rotated.position[0], -2, 1e-12);
+  EXPECT_NEAR(rotated.position[1], 1, 1e-12);
+  EXPECT_NEAR(rotated.position[2], -3, 1e-12);
+  EXPECT_NEAR(rotated.orientation[0], c, 1e-12);
+  EXPECT_NEAR(rotated.orientation[3], -c, 1e-12);
 }
 
 TEST(TrackedObject, LegacyImuPoseAndValidation) {

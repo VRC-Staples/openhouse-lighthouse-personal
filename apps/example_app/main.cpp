@@ -107,6 +107,8 @@ int main(int argc, char** argv) {
   }
 
   session->Stop();  // also saves the room map
+  const auto replayError = session->ReplayError();
+  if (!replayError.empty()) { std::fprintf(stderr, "%s\n", replayError.c_str()); return 1; }
   std::printf("stopped, room saved to %s\n", options.roomMapPath.c_str());
   return 0;
 }

@@ -98,6 +98,13 @@ TEST_F(ViewerInput, RejectsOutOfRangeIntegerConversion) {
   Rejected();
 }
 
+TEST_F(ViewerInput, RejectsNestedPoseWithoutCopyingIt) {
+  Hello();
+  const std::string nested = std::string(60000, '[') + "0" + std::string(60000, ']');
+  Send("{\"type\":\"state\",\"devices\":[{\"p\":" + nested + "}]}\n");
+  Rejected();
+}
+
 TEST_F(ViewerInput, RejectsOversizedCollections) {
   Hello();
   json devices = json::array();
@@ -149,6 +156,20 @@ TEST(ViewerSettings, RoundTripsAndRejectsMalformedFieldsWithoutPartialChanges) {
     EXPECT_EQ(settings.detail, Detail::Basic);
     EXPECT_EQ(unchanged.text, "keep this filter");
   }
+}
+
+TEST(ViewerSettings, IgnoresDeepUnknownFieldsAndRejectsDeepHiddenEntries) {
+  lh::files::StagingDirectory temp(fs::temp_directory_path());
+  const auto path = temp.Payload();
+  const std::string nested = std::string(30000, '[') + "0" + std::string(30000, ']');
+  Settings settings;
+  LogFilter filter;
+  lh::files::AtomicWrite(path, "{\"logs\":{\"future\":" + nested + ",\"debug\":true}}");
+  ASSERT_TRUE(settings.Load(path, filter));
+  EXPECT_TRUE(filter.debug);
+  lh::files::AtomicWrite(path, "{\"logs\":{\"hidden\":" + nested + "}}");
+  EXPECT_FALSE(settings.Load(path, filter));
+  EXPECT_TRUE(filter.debug);
 }
 
 TEST(ViewerSettings, RefusesOversizedInputAndOutput) {

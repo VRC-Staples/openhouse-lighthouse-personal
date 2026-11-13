@@ -286,9 +286,14 @@ if(LH_BUILD_VIEWER)
     install(TARGETS lhviz RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
     # openhouse-viewer: the running driver's status and log (telemetry over loopback)
     add_executable(openhouse-viewer apps/openhouse-viewer/main.cpp apps/openhouse-viewer/telemetry_client.cpp
-                   apps/openhouse-viewer/log_view.cpp apps/openhouse-viewer/views.cpp)
+                   apps/openhouse-viewer/log_view.cpp apps/openhouse-viewer/log_shape.cpp
+                   apps/openhouse-viewer/views.cpp)
     target_include_directories(openhouse-viewer PRIVATE src)
     target_link_libraries(openhouse-viewer PRIVATE lh_common lh_report lh_imgui nlohmann_json::nlohmann_json)
+    if(MSVC)
+      # Protect static imports before main can restrict later LoadLibrary calls.
+      target_link_options(openhouse-viewer PRIVATE /DEPENDENTLOADFLAG:0x800)
+    endif()
     install(TARGETS openhouse-viewer RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
   else()
     message(WARNING "LH_BUILD_VIEWER is on, but ${LH_VIEWER_MISSING} wasn't found: lhviz, openhouse-viewer "
@@ -300,6 +305,7 @@ endif()
 if(LH_BUILD_TESTS)
   enable_testing()
   enable_language(C)
+  include(cmake/viewer-tests.cmake)
   add_executable(lh_firmware_number_tests tests/personal/test_firmware_numbers.c)
   target_compile_features(lh_firmware_number_tests PRIVATE c_std_11)
   target_include_directories(lh_firmware_number_tests PRIVATE basestation_firmware/src)
@@ -350,7 +356,7 @@ if(LH_BUILD_TESTS)
   if(TARGET driver_lighthouse)
     add_executable(lh_openvr_component_tests tests/openvr/test_components.cpp
       tests/openvr/test_personal_boundaries.cpp tests/openvr/test_viewer_guards.cpp
-      tests/openvr/test_zip_writer.cpp tests/openvr/test_glb_bounds.cpp
+      tests/openvr/test_zip_writer.cpp tests/openvr/test_glb_bounds.cpp tests/openvr/test_room_metadata.cpp
       apps/openhouse-viewer/telemetry_client.cpp
       src/openvr/hand_skeleton.cpp src/openvr/raw_alignment.cpp src/openvr/steam_rooms.cpp src/openvr/room_publisher.cpp src/openvr/host_frame.cpp src/openvr/telemetry_server.cpp)
     target_include_directories(lh_openvr_component_tests PRIVATE src tests
@@ -382,6 +388,10 @@ if(LH_BUILD_TESTS)
   endif()
   target_link_libraries(lh_runtime_tests PRIVATE lh lh_tracking Eigen3::Eigen nlohmann_json::nlohmann_json GTest::gtest_main)
   add_test(NAME runtime COMMAND lh_runtime_tests)
+  if(TARGET lhtool AND Python3_Interpreter_FOUND)
+    add_test(NAME replay_errors COMMAND ${Python3_EXECUTABLE}
+      ${CMAKE_SOURCE_DIR}/scripts/tests/check-replay-errors.py $<TARGET_FILE:lhtool>)
+  endif()
   if(TARGET lhcapture)
     add_test(NAME capture_help COMMAND lhcapture --help)
     add_test(NAME capture_bad_duration COMMAND lhcapture --seconds not-a-number)

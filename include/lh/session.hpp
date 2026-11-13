@@ -257,7 +257,8 @@ class Session {
   virtual bool Start(std::string* error = nullptr) = 0;
   virtual void Stop() = 0;
   virtual bool Running() const = 0;
-  // Replay only: true once the whole capture has been processed.
+  // Replay only: input processing ended, including cancellation or failure.
+  // ReplayError distinguishes a read failure from successful completion or cancellation.
   virtual bool Finished() const = 0;
 
   virtual SessionSnapshot Snapshot() const = 0;
@@ -311,6 +312,9 @@ class Session {
   // Bumps on every ResetRoom (readers that hold anything room-relative drop it).
   virtual uint64_t RoomResets() const = 0;
   virtual bool SaveRoom(std::string* error = nullptr) = 0;
+
+  // Thread-safe. Empty unless the current replay failed; reset by Start.
+  virtual std::string ReplayError() const { return {}; }
 };
 
 }  // namespace lh

@@ -50,7 +50,9 @@ std::string ForeignUniverses(const std::string& lighthousedb, const std::set<std
   if (j.contains("known_universes") && j.at("known_universes").is_array()) {
     json kept = json::array();
     for (const auto& u : j.at("known_universes")) {
-      if (!u.is_object() || u.value("openhouse", false) || !u.contains("id")) continue;
+      if (!u.is_object() || !u.contains("id")) continue;
+      const auto marker = u.find("openhouse");
+      if (marker != u.end() && (!marker->is_boolean() || marker->get<bool>())) continue;
       if (keep.count(IdText(u.at("id")))) kept.push_back(u);
     }
     j["known_universes"] = kept;

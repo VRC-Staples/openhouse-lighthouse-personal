@@ -9,6 +9,7 @@ import re
 import shutil
 import subprocess
 import sys
+from windows_pe import require_system_dll_search
 
 repo = Path(__file__).resolve().parent.parent
 build = Path(sys.argv[1]).resolve()
@@ -16,6 +17,8 @@ prefix = Path(sys.argv[2]).resolve()
 out = repo / 'dist/openhouse-lighthouse-personal-windows-x64'
 if subprocess.check_output(['git', '-C', str(repo), 'status', '--porcelain'], text=True).strip():
     sys.exit('Refusing a release package from a dirty source tree; commit reviewed changes first.')
+# Fail before touching an existing output if the compiler omitted loader hardening.
+require_system_dll_search((build / 'openhouse-viewer.exe').read_bytes())
 shutil.rmtree(out, ignore_errors=True)
 (out / 'apps').mkdir(parents=True)
 files = {build / 'openvr/lighthouse/bin/win64/driver_lighthouse.dll': out / 'driver_lighthouse.dll',
@@ -29,6 +32,8 @@ for source, target in files.items():
     if not source.is_file():
         sys.exit(f'Missing build artifact: {source}')
     subprocess.run(['x86_64-w64-mingw32-strip', '--strip-unneeded', '-o', str(target), str(source)], check=True)
+    if source.name == 'openhouse-viewer.exe':
+        require_system_dll_search(target.read_bytes())
     pe = subprocess.check_output(['x86_64-w64-mingw32-objdump', '-p', str(target)], text=True)
     imports = re.findall(r'DLL Name:\s*(\S+)', pe)
     for name in imports:

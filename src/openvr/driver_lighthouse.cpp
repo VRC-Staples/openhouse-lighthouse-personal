@@ -1027,8 +1027,15 @@ class Provider : public IServerTrackedDeviceProvider {
       const auto setUp = lh::openvr::ChaperoneUniverses(chaperone);
       // SteamVR's universes (an imported room stays in its own), and those with Room Setup.
       if (!text.empty()) {
-        if (!alignment_.LoadText(lh::openvr::ForeignUniverses(text, AllUniverseIds(text)), &alignmentError)) Log(alignmentError);
-        if (!setUpAlignment_.LoadText(lh::openvr::ForeignUniverses(text, setUp), &alignmentError)) Log(alignmentError);
+        try {
+          if (!alignment_.LoadText(lh::openvr::ForeignUniverses(text, AllUniverseIds(text)),
+                                   &alignmentError)) Log(alignmentError);
+          if (!setUpAlignment_.LoadText(lh::openvr::ForeignUniverses(text, setUp),
+                                        &alignmentError)) Log(alignmentError);
+        } catch (const std::exception& error) {
+          Log(std::string("could not import SteamVR room metadata: ") + error.what());
+          return VRInitError_Driver_Failed;
+        }
       }
       std::string ids;
       for (const auto& id : setUp) ids += (ids.empty() ? "" : ", ") + id;

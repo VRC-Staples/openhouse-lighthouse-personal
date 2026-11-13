@@ -1,4 +1,5 @@
 #include "views.hpp"
+#include "map_camera.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -224,33 +225,6 @@ V3 Rotate(const std::array<double, 4>& q, const V3& v) {  // q: w x y z
 }
 V3 Add(const V3& a, const V3& b) { return {a[0] + b[0], a[1] + b[1], a[2] + b[2]}; }
 
-// An orbit camera around a target, perspective-projected onto a rectangle.
-struct Camera {
-  double yaw = 0.6, pitch = 0.55, distance = 7;
-  V3 target{0, 1, 0};
-  ImVec2 origin, size;
-  // false when behind the camera.
-  bool Project(const V3& p, ImVec2* out) const {
-    const double cy = std::cos(yaw), sy = std::sin(yaw), cp = std::cos(pitch), sp = std::sin(pitch);
-    const V3 eye{target[0] + distance * cp * sy, target[1] + distance * sp, target[2] + distance * cp * cy};
-    // camera basis: forward toward target
-    V3 f{target[0] - eye[0], target[1] - eye[1], target[2] - eye[2]};
-    const double fn = std::sqrt(f[0] * f[0] + f[1] * f[1] + f[2] * f[2]);
-    for (auto& c : f) c /= fn;
-    V3 r{f[2], 0, -f[0]};  // forward x up(0,1,0), normalized
-    const double rn = std::hypot(r[0], r[2]);
-    r = {-r[0] / rn, 0, -r[2] / rn};
-    const V3 u{r[1] * f[2] - r[2] * f[1], r[2] * f[0] - r[0] * f[2], r[0] * f[1] - r[1] * f[0]};
-    const V3 d{p[0] - eye[0], p[1] - eye[1], p[2] - eye[2]};
-    const double z = d[0] * f[0] + d[1] * f[1] + d[2] * f[2];
-    if (z < 0.05) return false;
-    const double x = d[0] * r[0] + d[1] * r[1] + d[2] * r[2], y = d[0] * u[0] + d[1] * u[1] + d[2] * u[2];
-    const double focal = std::min(size.x, size.y) * 1.1;
-    *out = ImVec2(float(origin.x + size.x / 2 + focal * x / z), float(origin.y + size.y / 2 - focal * y / z));
-    return true;
-  }
-};
-
 void Line3(ImDrawList* draw, const Camera& cam, const V3& a, const V3& b, ImU32 color, float width = 1) {
   ImVec2 pa, pb;
   if (cam.Project(a, &pa) && cam.Project(b, &pb)) draw->AddLine(pa, pb, color, width);
@@ -320,9 +294,9 @@ void DrawMap(const State& s) {
     }
     Line3(draw, cam, tip, {tip[0], floorY, tip[2]}, IM_COL32(60, 66, 76, 255));  // drop line: height at a glance
     ImVec2 p;
-    if (cam.Project(tip, &p)) {
+    if (cam.ProjectLabel(tip, {8, -16}, &p)) {
       const std::string label = b.channel.empty() ? Short(b.serial) : "ch " + b.channel;
-      draw->AddText({p.x + 8, p.y - 16}, IM_COL32(220, 222, 226, 255), label.c_str());
+      draw->AddText(p, IM_COL32(220, 222, 226, 255), label.c_str());
     }
   }
   // Devices: a dot and their own axes (red x, green y, blue z), 10 cm.
@@ -334,10 +308,10 @@ void DrawMap(const State& s) {
     Line3(draw, cam, d.p, Add(d.p, Rotate(d.q, {0, 0, 0.1})), IM_COL32(90, 140, 255, 255), 2);
     Line3(draw, cam, d.p, {d.p[0], floorY, d.p[2]}, IM_COL32(60, 66, 76, 255));
     ImVec2 p;
-    if (cam.Project(d.p, &p)) {
+    if (cam.ProjectLabel(d.p, {}, &p))
       draw->AddCircleFilled(p, d.role == "hmd" ? 6.f : 4.5f, U32(col));
-      draw->AddText({p.x + 8, p.y - 6}, IM_COL32(200, 204, 210, 255), DeviceName(d).c_str());
-    }
+    if (cam.ProjectLabel(d.p, {8, -6}, &p))
+      draw->AddText(p, IM_COL32(200, 204, 210, 255), DeviceName(d).c_str());
   }
   draw->PopClipRect();
   draw->AddText({cam.origin.x + 8, cam.origin.y + 6}, IM_COL32(140, 146, 154, 255),

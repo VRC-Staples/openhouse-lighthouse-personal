@@ -1,11 +1,36 @@
 #include <gtest/gtest.h>
 #include <algorithm>
 #include <sstream>
+#include <set>
+#include <thread>
+#include <vector>
 #include "report/zip_writer.hpp"
+#include "report/report_name.hpp"
 
 namespace {
 namespace fs = std::filesystem;
 using lh::report::ZipWriter;
+
+TEST(ReportNames, SameSecondConcurrentNamesAreDistinct) {
+  std::vector<std::string> names(16);
+  std::vector<std::thread> threads;
+  for (size_t i = 0; i < names.size(); ++i)
+    threads.emplace_back([&, i] { names[i] = lh::report::ReportFilename("20261113-120000", 123); });
+  for (auto& thread : threads) thread.join();
+  EXPECT_EQ(std::set<std::string>(names.begin(), names.end()).size(), names.size());
+  lh::files::StagingDirectory temp(fs::temp_directory_path());
+  const auto directory = temp.Payload().parent_path();
+  for (size_t i = 0; i < 2; ++i) {
+    ZipWriter writer;
+    ASSERT_TRUE(writer.Open(directory / names[i]));
+    ASSERT_TRUE(writer.AddText("info.txt", "synthetic diagnostic report"));
+    ASSERT_TRUE(writer.Close());
+  }
+  EXPECT_TRUE(fs::is_regular_file(directory / names[0]));
+  EXPECT_TRUE(fs::is_regular_file(directory / names[1]));
+  fs::remove(directory / names[0]);
+  fs::remove(directory / names[1]);
+}
 
 TEST(ReportTransactions, FailedInputCannotPublishEvenWhenCallerFinalizes) {
   lh::files::StagingDirectory temp(fs::temp_directory_path());

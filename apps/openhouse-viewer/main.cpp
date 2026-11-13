@@ -24,6 +24,7 @@
 #include "settings.hpp"
 #include "telemetry_client.hpp"
 #include "views.hpp"
+#include "windows_dll_search.hpp"
 
 namespace {
 using namespace openhouse::viewer;
@@ -99,6 +100,10 @@ void Section(const char* title) {
 }  // namespace
 
 int main() {
+  if (!RestrictDllSearch()) {
+    std::fprintf(stderr, "openhouse-viewer: cannot restrict DLL loading to the Windows system directory\n");
+    return 1;
+  }
   if (!glfwInit()) {
     std::fprintf(stderr, "openhouse-viewer: no display\n");
     return 1;

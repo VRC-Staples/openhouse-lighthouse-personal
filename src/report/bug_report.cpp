@@ -12,6 +12,7 @@
 #include "lh/version.hpp"
 #include "platform/platform.hpp"
 #include "zip_writer.hpp"
+#include "report_name.hpp"
 
 #ifdef _WIN32
 #include <knownfolders.h>
@@ -118,9 +119,7 @@ std::string SaveBugReportOnce(const BugReportOptions& options, std::string* erro
   std::error_code ec;
   fs::create_directories(dir, ec);
   if (ec) return fail("cannot create " + Utf8(dir) + ": " + ec.message());
-  // The process id too: the driver and the viewer can both save one in the same second (#46).
-  const fs::path zip = dir / ("openhouse-report-" + Timestamp("%Y%m%d-%H%M%S") + "-" +
-                              std::to_string(platform::ProcessId()) + ".zip");
+  const fs::path zip = dir / report::ReportFilename(Timestamp("%Y%m%d-%H%M%S"), platform::ProcessId());
 
   // (name in the zip, source); a missing one is listed as such in info.txt.
   std::vector<std::pair<std::string, fs::path>> files;

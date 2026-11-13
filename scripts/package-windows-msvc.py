@@ -6,11 +6,11 @@ import os
 from pathlib import Path
 import re
 import shutil
-import struct
 import subprocess
 import sys
 import tempfile
 import xml.etree.ElementTree as ET
+from windows_pe import require_x64, require_system_dll_search
 
 ROOT = Path(__file__).resolve().parent.parent
 NAME = 'openhouse-lighthouse-personal-windows-x64'
@@ -24,6 +24,7 @@ SYSTEM_DLLS = {
 REQUIRED_TESTS = {
     'personal_safety', 'personal_shutdown', 'firmware_numbers', 'unit', 'replay', 'openvr_components',
     'openvr_driver', 'runtime', 'capture_help', 'capture_bad_duration', 'capture_no_overwrite',
+    'viewer_math', 'viewer_dll_search', 'viewer_startup', 'replay_errors',
 }
 
 
@@ -43,19 +44,6 @@ def require_tests(report):
     if any(node.tag in {'failure', 'error', 'skipped'} for node in root.iter()):
         raise ValueError('CTest did not pass every target')
     return sorted(names)
-
-
-def require_x64(data, dll):
-    if len(data) < 64 or data[:2] != b'MZ':
-        raise ValueError('Not a Windows executable')
-    pe = struct.unpack_from('<I', data, 0x3c)[0]
-    if pe > len(data) - 26 or data[pe:pe + 4] != b'PE\0\0':
-        raise ValueError('Invalid PE header')
-    machine = struct.unpack_from('<H', data, pe + 4)[0]
-    flags = struct.unpack_from('<H', data, pe + 22)[0]
-    magic = struct.unpack_from('<H', data, pe + 24)[0]
-    if machine != 0x8664 or magic != 0x20b or bool(flags & 0x2000) != dll:
-        raise ValueError('Expected an x64 PE32+ image with the correct DLL/EXE type')
 
 
 def require_imports(text):
@@ -87,6 +75,7 @@ def copy_artifacts(build, destination):
         require_x64(data, source.suffix == '.dll')
         imports = require_imports(output('dumpbin', '/dependents', str(source)))
         if source.name == 'openhouse-viewer.exe':
+            require_system_dll_search(data)
             if re.search(r'\bShellExecute(?:Ex)?[AW]\b', output('dumpbin', '/imports', str(source))):
                 raise ValueError('The viewer still imports a shell-opening callback')
         if source.suffix == '.dll':

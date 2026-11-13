@@ -3,10 +3,12 @@
 import importlib.util
 from pathlib import Path
 import struct
+import sys
 import tempfile
 import unittest
 
 SCRIPT = Path(__file__).resolve().parents[1] / 'package-windows-msvc.py'
+sys.path.insert(0, str(SCRIPT.parent))
 SPEC = importlib.util.spec_from_file_location('packager', SCRIPT)
 packager = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(packager)
@@ -43,6 +45,31 @@ class PackageTests(unittest.TestCase):
             packager.require_x64(data, True)
         with self.assertRaises(ValueError):
             packager.require_x64(b'MZ', True)
+
+    def test_viewer_static_dll_search_is_system_only(self):
+        data = bytearray(1024)
+        data[:2] = b'MZ'
+        struct.pack_into('<I', data, 0x3c, 128)
+        data[128:132] = b'PE\0\0'
+        struct.pack_into('<HH', data, 132, 0x8664, 1)
+        struct.pack_into('<H', data, 148, 240)
+        struct.pack_into('<H', data, 152, 0x20b)
+        struct.pack_into('<I', data, 260, 16)
+        struct.pack_into('<II', data, 344, 0x1000, 80)
+        struct.pack_into('<III', data, 404, 0x1000, 128, 512)
+        struct.pack_into('<I', data, 512, 80)
+        struct.pack_into('<H', data, 590, 0x800)
+        packager.require_system_dll_search(data)
+        for flags in (0, 0x900):
+            struct.pack_into('<H', data, 590, flags)
+            with self.assertRaises(ValueError):
+                packager.require_system_dll_search(data)
+        struct.pack_into('<H', data, 590, 0x800)
+        with self.assertRaises(ValueError):
+            packager.require_system_dll_search(data[:550])
+        struct.pack_into('<I', data, 348, 79)
+        with self.assertRaises(ValueError):
+            packager.require_system_dll_search(data)
 
     def test_requires_all_test_targets_to_pass(self):
         cases = ''.join(f'<testcase name="{name}"/>' for name in packager.REQUIRED_TESTS)

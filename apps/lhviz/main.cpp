@@ -377,7 +377,12 @@ int main(int argc, char** argv) {
     ImGui::Text("%s   room %s (rev %llu)   t=%.2f", options.replayPath.empty() ? "live" : "replay",
                 snap.roomId.empty() ? "-" : snap.roomId.c_str(), static_cast<unsigned long long>(snap.roomRevision),
                 snap.hostTime);
-    if (session->Finished()) { ImGui::SameLine(); ImGui::TextColored(ImVec4(1, 0.8f, 0.3f, 1), "  replay finished"); }
+    if (session->Finished()) {
+      ImGui::SameLine();
+      const auto error = session->ReplayError();
+      ImGui::TextColored(error.empty() ? ImVec4(1, 0.8f, 0.3f, 1) : ImVec4(1, 0.3f, 0.3f, 1),
+                         "%s", error.empty() ? "  replay finished" : error.c_str());
+    }
     if (ImGui::Button("Reset room")) session->ResetRoom();
     ImGui::SameLine();
     if (ImGui::Button("Save room")) {

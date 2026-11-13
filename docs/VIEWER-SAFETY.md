@@ -42,9 +42,9 @@ defaults when the viewer saves settings on exit.
 ## Diagnostic report writes
 
 The report ZIP is written to staging on the destination volume. Only a completed ZIP is
-published. Publishing refuses an existing destination, including another report saved with
-the same second-resolution timestamp and process ID. A failed report no longer removes that
-existing path. If a name collision occurs, retry saving after the timestamp changes.
+published. Filenames include the timestamp, process ID, and an atomic per-process sequence.
+Rapid or concurrent saves in one process receive distinct names. Publishing still refuses an
+existing destination. A failed report does not remove that existing path.
 
 This shared ZIP writer is also used by the driver's existing local report command.
 A failed addition permanently prevents publication, even if a caller later calls `Close()`.
@@ -54,6 +54,20 @@ The writer retains the existing non-ZIP64 format and its 32-bit size limits.
 
 These changes correct preview.2's incomplete finalization guard. Its staging protected existing
 reports, but a failed addition followed by `Close()` could publish an incomplete archive.
+
+## Viewer DLL loading
+
+The Windows viewer restricts default DLL searches to System32 before GLFW initializes.
+The MSVC executable also sets `/DEPENDENTLOADFLAG:0x800`, which restricts static imports before `main`.
+This static-import protection requires Windows 10 version 1607 or later.
+Both Windows packagers refuse a viewer without that flag. Application-directory wrappers and
+DLLs found through the current directory or PATH are not supported by the personal viewer.
+Explicit trusted paths remain supported for dependencies that need them.
+
+This restriction belongs to the viewer process, not the SteamVR host. It does not change global
+security settings, remove clipboard or input features, or disable same-user peer authorization.
+The controlled loader test uses a harmless DLL. The graphics test creates a hidden GLFW/OpenGL window
+on the CI runner. Neither test certifies every GPU driver or explains antivirus classification.
 
 ## Verification
 

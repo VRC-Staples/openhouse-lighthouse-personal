@@ -28,8 +28,10 @@ int Int(const json& object, const char* key, int fallback = 0) {
 }
 
 template <size_t N>
-std::array<double, N> Array(const json& j, std::array<double, N> fallback) {
-  if (j.is_null()) return fallback;
+std::array<double, N> Array(const json& object, const char* key, std::array<double, N> fallback) {
+  const auto it = object.find(key);
+  if (it == object.end() || it->is_null()) return fallback;
+  const auto& j = *it;
   if (!j.is_array() || j.size() != N) throw std::invalid_argument("Invalid pose vector");
   for (size_t i = 0; i < N; ++i) {
     const double value = j[i].get<double>();
@@ -55,8 +57,8 @@ Base ReadBase(const json& b) {
   x.sigma = b.value("sigma", 0.0);
   x.learned = b.value("learned", x.locked || x.sigma <= 0.005);
   x.faults = Int(b, "faults");
-  x.p = Array<3>(b.value("p", json()), x.p);
-  x.q = Array<4>(b.value("q", json()), x.q);
+  x.p = Array<3>(b, "p", x.p);
+  x.q = Array<4>(b, "q", x.q);
   return x;
 }
 
@@ -73,9 +75,9 @@ Device ReadDevice(const json& d) {
   x.charging = d.value("charging", false);
   x.valid = d.value("valid", false);
   if (const auto b = d.find("battery"); b != d.end() && !b->is_null()) x.battery = Int(d, "battery");
-  x.p = Array<3>(d.value("p", json()), x.p);
-  x.v = Array<3>(d.value("v", json()), x.v);
-  x.q = Array<4>(d.value("q", json()), x.q);
+  x.p = Array<3>(d, "p", x.p);
+  x.v = Array<3>(d, "v", x.v);
+  x.q = Array<4>(d, "q", x.q);
   for (const auto& b : List(d, "bases")) x.bases.push_back(b.get<std::string>());
   for (const auto& c : List(d, "coverage"))
     x.coverage.push_back({c.value("base", ""), Int(c, "frames"), c.value("sensors", 0.0)});

@@ -47,6 +47,16 @@ def main():
                     '-lws2_32', '-liphlpapi', '-ladvapi32',
                     '-o', str(OUT / 'personal-safety.exe')], 'compile-safety')
     run([str(OUT / 'personal-safety.exe')], 'test-safety')
+    viewer = ['-Iinclude', '-Iapps/openhouse-viewer', '-Ithird_party/imgui']
+    run(compiler + viewer + ['tests/personal/test_viewer_math.cpp',
+        'apps/openhouse-viewer/log_shape.cpp', '-o', str(OUT / 'viewer-math.exe')], 'compile-viewer-math')
+    run([str(OUT / 'viewer-math.exe')], 'test-viewer-math')
+    probe = OUT / 'openhouse-loader-probe.dll'
+    run([zig, 'cc', '-target', 'x86_64-windows-gnu', '-shared', '-O0',
+         'tests/personal/dll_probe.c', '-o', str(probe)], 'compile-loader-probe')
+    run(compiler + viewer + ['tests/personal/test_dll_search.cpp',
+        '-o', str(OUT / 'dll-search.exe')], 'compile-dll-search')
+    run([str(OUT / 'dll-search.exe'), str(probe)], 'test-dll-search')
     shutdown = ['apps/openhouse-installer/process_shutdown.cpp', '-ladvapi32', '-luser32']
     run(compiler + ['tests/personal/test_shutdown.cpp'] + shutdown +
         ['-o', str(OUT / 'shutdown-tests.exe')], 'compile-shutdown')
