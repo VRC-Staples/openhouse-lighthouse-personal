@@ -7,7 +7,8 @@ TEST(PlatformReview, ParsesUnicodeAndRejectsMalformedPathLists) {
   using lh::platform::JsonStringList;
   EXPECT_EQ(JsonStringList(R"({"runtime":["D:\\VR\u0020Library\\SteamVR","other"]})", "runtime"),
             (std::vector<std::string>{R"(D:\VR Library\SteamVR)", "other"}));
-  EXPECT_EQ(JsonStringList(R"({"runtime":["\ud83d\ude00"]})", "runtime"),
+  const std::string surrogate = "{\"runtime\":[\"\\ud83d\\ude00\"]}";
+  EXPECT_EQ(JsonStringList(surrogate, "runtime"),
             (std::vector<std::string>{"\xf0\x9f\x98\x80"}));
   EXPECT_TRUE(JsonStringList(R"({"runtime":["ok",false]})", "runtime").empty());
   EXPECT_TRUE(JsonStringList(R"({"runtime":"wrong"})", "runtime").empty());
