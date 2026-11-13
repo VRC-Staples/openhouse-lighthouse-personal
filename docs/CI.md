@@ -29,6 +29,19 @@ including CMake 4.4.3, pkgconf 3.0.7, and the MSYS2 runtime 3.6.10-4; their hash
 The runner's existing CMake starts the project build; the recipes use their pinned helper CMake.
 Metrics and external binary caches are disabled.
 
+`vcpkg-configuration.json` selects a repository overlay for static zlib 1.4 only.
+An overlay is a local recipe that replaces one upstream port without changing the baseline.
+The lock binds the configuration and every overlay file to normalized SHA-256 hashes.
+It also records the zlib source URL, commit, and archive SHA-512.
+`scripts/toolchain_lock.py` checks those records before CI downloads or installations
+and before packaging.
+The Linux and MinGW entry points run the same check and require the existing pinned vcpkg checkout.
+They do not clone or bootstrap tools. All other dependency pins remain unchanged.
+
+Changes to the zlib recipe do not authorize its execution on a runner or a local PC.
+The updated recipe needs separate approval before dependency installation or CI execution.
+The standalone zlib check does not replace the integrated driver, consumer, or viewer tests.
+
 Tool installation is restricted to the runner's `.ci-tools/vcpkg` directory. Dependencies and
 build output are under `build-ci`. No tool or dependency installation on a local PC is authorized
 by this workflow. Updating the lock or adding tools requires a separate review and approval.
@@ -36,8 +49,10 @@ by this workflow. Updating the lock or adding tools requires a separate review a
 ## Package checks
 
 Packaging refuses a dirty source tree or a source revision different from the workflow revision.
-It requires successful results for all ten expected CTest targets, including the personal safety,
-shutdown, runtime, and OpenVR tests. Failed, skipped, or missing CTest targets block the package.
+It requires successful results for all 16 expected CTest targets, including personal safety,
+shutdown, runtime, OpenVR, and `zlib_compatibility`.
+The zlib target checks version identity, exact-output raw-deflate completion,
+decompression, and CRC. Failed, skipped, or missing CTest targets block the package.
 Individual upstream GoogleTest cases can skip optional fixtures inside a passing target.
 
 The package must contain an x64 driver, installer, and viewer. Each binary must import only

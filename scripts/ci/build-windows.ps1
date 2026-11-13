@@ -11,13 +11,8 @@ function Run([string]$Program, [string[]]$Arguments) {
 
 $repo = (Resolve-Path "$PSScriptRoot/../..").Path
 Set-Location $repo
+Run python @('scripts/toolchain_lock.py')
 $lock = Get-Content "$PSScriptRoot/toolchain-lock.json" -Raw | ConvertFrom-Json
-$manifestText = (Get-Content "$repo/vcpkg.json" -Raw).Replace("`r`n", "`n")
-$manifest = $manifestText | ConvertFrom-Json
-$manifestHash = [Convert]::ToHexString(
-    [Security.Cryptography.SHA256]::HashData([Text.Encoding]::UTF8.GetBytes($manifestText)))
-if ($manifest.'builtin-baseline' -ne $lock.vcpkg_commit -or
-    $manifestHash -ne $lock.manifest_sha256) { throw 'The approved dependency manifest changed.' }
 
 $vswhere = "${env:ProgramFiles(x86)}/Microsoft Visual Studio/Installer/vswhere.exe"
 $vs = & $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 `
@@ -51,10 +46,12 @@ Run $binary @('version', '--disable-metrics')
 
 $build = "$repo/build-ci"
 $triplet = 'x64-windows-static-release'
+Run python @('scripts/tests/test_toolchain_lock.py')
 Run python @('scripts/tests/test_package_windows.py')
 Run python @('scripts/tests/check-viewer-startup.py', '--self-test')
 Run cmake @('-P', 'scripts/tests/check-triplet.cmake')
 Run cmake @('-P', 'scripts/tests/check-package-dependencies.cmake')
+Run cmake @('-P', 'scripts/tests/check-zlib-overlay.cmake')
 Run cmake @('-S', '.', '-B', $build, '-G', 'Ninja', '-DCMAKE_BUILD_TYPE=Release',
     "-DCMAKE_TOOLCHAIN_FILE=$tools/scripts/buildsystems/vcpkg.cmake",
     "-DVCPKG_OVERLAY_TRIPLETS=$repo/cmake/triplets", "-DVCPKG_TARGET_TRIPLET=$triplet",

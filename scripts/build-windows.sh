@@ -2,6 +2,7 @@
 # Cross-build on Linux. Does not install or change the running Linux driver.
 set -euo pipefail
 repo=$(cd "$(dirname "$0")/.." && pwd)
+python3 "$repo/scripts/toolchain_lock.py"
 # Dedicated checkout; deliberately not $VCPKG_ROOT (a system vcpkg checkout may lack
 # the pinned baseline). Override with LH_VCPKG_ROOT.
 root=${LH_VCPKG_ROOT:-${XDG_CACHE_HOME:-$HOME/.cache}/openhouse/vcpkg}

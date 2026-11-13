@@ -47,7 +47,7 @@ include(cmake/windows/lh_windows_resources.cmake)
 find_package(Eigen3 REQUIRED NO_MODULE)
 find_package(Ceres REQUIRED)
 find_package(nlohmann_json REQUIRED)
-find_package(ZLIB REQUIRED)
+find_package(ZLIB 1.4 EXACT REQUIRED)
 find_package(Threads REQUIRED)
 
 # ---- tracking: no hardware dependencies ---------------------------------------
@@ -324,6 +324,9 @@ if(LH_BUILD_TESTS)
     target_link_libraries(lh_shutdown_tests PRIVATE advapi32 user32)
     add_test(NAME personal_shutdown COMMAND lh_shutdown_tests)
   endif()
+  add_executable(lh_zlib_compatibility_tests tests/personal/test_zlib_compatibility.cpp)
+  target_link_libraries(lh_zlib_compatibility_tests PRIVATE ZLIB::ZLIB)
+  add_test(NAME zlib_compatibility COMMAND lh_zlib_compatibility_tests)
   find_package(GTest REQUIRED)
   add_executable(lh_unit_tests
     tests/unit/test_platform.cpp tests/unit/test_review_platform.cpp

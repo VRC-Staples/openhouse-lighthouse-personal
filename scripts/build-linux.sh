@@ -4,11 +4,18 @@
 # Does not install or change the running driver.
 set -euo pipefail
 repo=$(cd "$(dirname "$0")/.." && pwd)
+python3 "$repo/scripts/toolchain_lock.py"
 root=${LH_VCPKG_ROOT:-${XDG_CACHE_HOME:-$HOME/.cache}/openhouse/vcpkg}
-if [[ ! -f "$root/scripts/buildsystems/vcpkg.cmake" ]]; then
-  git clone https://github.com/microsoft/vcpkg.git "$root"
-fi
-[[ -x "$root/vcpkg" ]] || "$root/bootstrap-vcpkg.sh" -disableMetrics
+expected=a5f736224e85b32e25a8ffc52562333180396642
+[[ -x "$root/vcpkg" && -f "$root/scripts/buildsystems/vcpkg.cmake" ]] || {
+  echo 'Set LH_VCPKG_ROOT to an approved, preinstalled vcpkg checkout.' >&2; exit 1;
+}
+[[ $(git -C "$root" rev-parse HEAD) == "$expected" ]] || {
+  echo "vcpkg tooling must be at $expected" >&2; exit 1;
+}
+[[ -z $(git -C "$root" status --porcelain) ]] || {
+  echo 'vcpkg tooling checkout must be clean.' >&2; exit 1;
+}
 export VCPKG_ROOT="$root" VCPKG_MAX_CONCURRENCY="${VCPKG_MAX_CONCURRENCY:-16}"
 triplet=x64-linux-static-release
 "$root/vcpkg" install --x-manifest-root="$repo" --x-install-root="$root/installed" \

@@ -10,8 +10,10 @@ import shutil
 import subprocess
 import sys
 from windows_pe import require_system_dll_search
+from toolchain_lock import read_lock
 
 repo = Path(__file__).resolve().parent.parent
+lock = read_lock(repo)
 build = Path(sys.argv[1]).resolve()
 prefix = Path(sys.argv[2]).resolve()
 out = repo / 'dist/openhouse-lighthouse-personal-windows-x64'
@@ -64,7 +66,8 @@ shutil.copy2(repo / 'README.md', out / 'README.md')
     'source_dirty': False,
     'profile': 'personal-lighthouse-trackers-and-controllers-no-headset',
     'compiler': subprocess.check_output(['x86_64-w64-mingw32-g++', '-dumpfullversion'], text=True).strip(),
-    'vcpkg_baseline': json.loads((repo / 'vcpkg.json').read_text())['builtin-baseline'],
+    'vcpkg_baseline': lock['vcpkg_commit'],
+    'toolchain': lock,
     'artifacts': artifacts,
 }, indent=2) + '\n')
 archive = shutil.make_archive(str(out), 'zip', out.parent, out.name)

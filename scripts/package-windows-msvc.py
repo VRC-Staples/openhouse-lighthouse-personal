@@ -11,6 +11,7 @@ import sys
 import tempfile
 import xml.etree.ElementTree as ET
 from windows_pe import require_x64, require_system_dll_search
+from toolchain_lock import read_lock
 
 ROOT = Path(__file__).resolve().parent.parent
 NAME = 'openhouse-lighthouse-personal-windows-x64'
@@ -24,7 +25,7 @@ SYSTEM_DLLS = {
 REQUIRED_TESTS = {
     'personal_safety', 'personal_shutdown', 'firmware_numbers', 'unit', 'replay', 'openvr_components',
     'openvr_driver', 'runtime', 'capture_help', 'capture_bad_duration', 'capture_no_overwrite',
-    'viewer_math', 'viewer_dll_search', 'viewer_startup', 'replay_errors',
+    'viewer_math', 'viewer_dll_search', 'viewer_startup', 'replay_errors', 'zlib_compatibility',
 }
 
 
@@ -108,7 +109,7 @@ def package(build, prefix):
     commit = output('git', 'rev-parse', 'HEAD')
     if os.environ.get('GITHUB_SHA', commit) != commit:
         raise ValueError('Source revision does not match the workflow revision')
-    lock = json.loads((ROOT / 'scripts/ci/toolchain-lock.json').read_text(encoding='utf-8'))
+    lock = read_lock(ROOT)
     dist = ROOT / 'dist'
     dist.mkdir(exist_ok=True)
     archive = dist / f'{NAME}.zip'
