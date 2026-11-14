@@ -39,10 +39,12 @@ See [the validation record](docs/VALIDATION.md) for tested and untested behavior
 See [viewer safeguards and network scope](docs/VIEWER-SAFETY.md) for input limits, safe file writes,
 and the distinction between local statistics and Internet telemetry.
 
-The personal Windows package contains only the driver, installer, viewer, documentation, and license notices.
-It does not include the update checker, comparison app, firmware, or standalone diagnostic tools.
+The Windows preview package includes the driver, installer, viewer, documentation, and license notices.
+It also includes `lhtool`, `lhcapture`, `lhviz`, `openhouse-compare`, and matching `lh.dll` in `apps/`.
+It excludes the upstream update checker, SDK example, and firmware.
 The source for all eight applications is retained. Diagnostic targets also build by default;
-the additional updater, comparison app, and SDK example are available through an opt-in build.
+the additional checker, comparison app, and SDK example are available through an opt-in build.
+Do not run a second live hardware session while SteamVR owns the same receivers.
 See [Application builds](docs/APPLICATIONS.md) for their roles and runtime boundaries.
 
 ## Safety boundaries
@@ -83,7 +85,8 @@ This does not add executables to the Windows package or register an automatic up
 
 CMake can skip the driver or viewer if their dependencies are missing.
 A successful partial build is not a successful VR release build.
-Make sure that `driver_lighthouse`, `openhouse-installer`, and `openhouse-viewer` all build before packaging.
+For the Windows preview package, enable `LH_BUILD_EXTRA_APPS` and build all package targets.
+Packaging requires the driver, installer, viewer, diagnostic tools, and matching runtime DLL.
 
 The hardware-free regression executable needs only a C++20 compiler and the Windows SDK libraries.
 It uses temporary files and a temporary loopback listener. It does not open VR hardware or change SteamVR.

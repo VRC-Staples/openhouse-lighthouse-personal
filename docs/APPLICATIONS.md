@@ -1,8 +1,10 @@
 # Application builds
 
-All eight upstream application source directories remain in this fork. The standard Windows
-package contains only the driver, installer, and viewer. That package list is separate from
-which applications CMake builds.
+All eight upstream application source directories remain in this fork. The Windows preview
+package includes the driver, installer, viewer, `lhtool`, `lhcapture`, `lhviz`, and
+`openhouse-compare`. The matching `lh.dll` is beside the tools in `apps/`.
+The upstream checker and SDK example are excluded from the package.
+The package list is separate from which applications CMake builds.
 
 ## Applications and dependencies
 
@@ -22,7 +24,7 @@ The SteamVR driver embeds its own runtime. It does not need the diagnostic execu
 be installed or running. Keep the matching `lh.dll` beside diagnostic apps that import it.
 
 The root build already included `lhtool`, `lhcapture`, and `lhviz` before the extra-app option
-was added. Their absence from the Windows ZIP was a packaging choice, not source deletion.
+was added. Their absence from earlier Windows ZIPs was a packaging choice, not source deletion.
 The SDK example also retains its original independent build in `apps/example_app`.
 
 ## Build every application
@@ -40,9 +42,11 @@ cmake --build build-all --parallel 2
 libraries, GLFW/OpenGL, and OpenVR headers. Missing prerequisites cause a configuration
 error instead of silently omitting the extra apps.
 
-The option adds build targets only. It does not change the driver-only installer, package
-contents, startup registration, or headset restrictions. The extra apps are not added to
-CMake's installation rules.
+The option adds build targets only. It does not change the driver-only installer,
+startup registration, or headset restrictions. The extra apps are not added to
+CMake's installation rules. Windows preview CI enables the option so that the explicit
+package list can include `openhouse-compare`. It also builds the checker and SDK example,
+but does not package or run them.
 
 ## Before running diagnostic apps
 

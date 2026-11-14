@@ -50,11 +50,13 @@ def require_tests(report):
     return sorted(names)
 
 
-def require_imports(text):
+def require_imports(text, allow_runtime=False):
     imports = sorted(set(re.findall(r'^\s+([\w.-]+\.dll)\s*$', text, re.I | re.M)))
     if not imports:
         raise ValueError('dumpbin reported no DLL imports')
     for name in imports:
+        if allow_runtime and name.lower() == 'lh.dll':
+            continue
         if name.lower() not in SYSTEM_DLLS and not name.lower().startswith('api-ms-win-'):
             raise ValueError(f'Unbundled or unexpected dependency: {name}')
     return imports
@@ -71,18 +73,26 @@ def copy_artifacts(build, destination):
         'openvr/lighthouse/bin/win64/driver_lighthouse.dll': 'driver_lighthouse.dll',
         'openhouse-installer.exe': 'openhouse-installer.exe',
         'openhouse-viewer.exe': 'apps/openhouse-viewer.exe',
+        'lhtool.exe': 'apps/lhtool.exe',
+        'lhcapture.exe': 'apps/lhcapture.exe',
+        'lhviz.exe': 'apps/lhviz.exe',
+        'openhouse-compare.exe': 'apps/openhouse-compare.exe',
+        'lh.dll': 'apps/lh.dll',
     }
     artifacts = []
     for source_name, target_name in files.items():
         source, target = build / source_name, destination / target_name
         data = source.read_bytes()
         require_x64(data, source.suffix == '.dll')
-        imports = require_imports(output('dumpbin', '/dependents', str(source)))
+        imports = require_imports(output('dumpbin', '/dependents', str(source)),
+                                  allow_runtime=source.name in {
+                                      'lhtool.exe', 'lhviz.exe', 'openhouse-compare.exe',
+                                  })
         if source.name == 'openhouse-viewer.exe':
             require_system_dll_search(data)
             if re.search(r'\bShellExecute(?:Ex)?[AW]\b', output('dumpbin', '/imports', str(source))):
                 raise ValueError('The viewer still imports a shell-opening callback')
-        if source.suffix == '.dll':
+        if source.name == 'driver_lighthouse.dll':
             require_exports(output('dumpbin', '/exports', str(source)))
             if b'openhouse-personal-lighthouse-only' not in data:
                 raise ValueError('The driver lacks the personal-fork marker')
@@ -103,6 +113,7 @@ def copy_notices(prefix, destination, ports):
     shutil.copy2(ROOT / 'LICENSE', destination / 'LICENSE.txt')
     shutil.copy2(ROOT / 'README.md', destination / 'README.md')
     shutil.copy2(ROOT / 'docs/VALIDATION.md', destination / 'VALIDATION.md')
+    shutil.copy2(ROOT / 'docs/APPLICATIONS.md', destination / 'APPLICATIONS.md')
 
 
 def package(build, prefix):

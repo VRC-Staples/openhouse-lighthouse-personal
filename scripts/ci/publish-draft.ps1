@@ -19,8 +19,11 @@ For Quest Pro users with Vive trackers and Index controllers. Not hardware-valid
 This unpublished draft is not a private published release; the source repository is public.
 
 - Includes the driver, consent-based installer, tracking-statistics viewer, and license notices.
+- Includes lhtool, lhcapture, lhviz, openhouse-compare, and their matching lh.dll in apps/.
+- Diagnostic tools can open tracking hardware. Do not run a second live USB session while SteamVR owns the receivers.
+- Keep lh.dll beside the diagnostic executables. See APPLICATIONS.md before running them.
 - Windows builds and the required hardware-free CTest targets passed before packaging.
-- Excludes the stock-headset bridge, firmware, updater, and standalone developer tools.
+- Excludes the stock-headset bridge, firmware, upstream update checker, and SDK example.
 - Binaries are unsigned. No antivirus-vendor verdict or real SteamVR shutdown test is claimed.
 - Keep Defender and SmartScreen enabled. Force-close can lose unsaved work.
 

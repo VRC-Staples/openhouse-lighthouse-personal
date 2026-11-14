@@ -1,11 +1,14 @@
 #!/usr/bin/env python3
 """Hardware-free checks for the native Windows package validation gates."""
+from contextlib import contextmanager
+import hashlib
 import importlib.util
 from pathlib import Path
 import struct
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 SCRIPT = Path(__file__).resolve().parents[1] / 'package-windows-msvc.py'
 sys.path.insert(0, str(SCRIPT.parent))
@@ -110,6 +113,78 @@ class PackageTests(unittest.TestCase):
             report.write_text(f'<testsuite disabled="1">{cases}</testsuite>')
             with self.assertRaises(ValueError):
                 packager.require_tests(report)
+
+
+class DiagnosticPackageTests(unittest.TestCase):
+    layout = {
+        'openvr/lighthouse/bin/win64/driver_lighthouse.dll': 'driver_lighthouse.dll',
+        'openhouse-installer.exe': 'openhouse-installer.exe',
+        'openhouse-viewer.exe': 'apps/openhouse-viewer.exe',
+        'lhtool.exe': 'apps/lhtool.exe',
+        'lhcapture.exe': 'apps/lhcapture.exe',
+        'lhviz.exe': 'apps/lhviz.exe',
+        'openhouse-compare.exe': 'apps/openhouse-compare.exe',
+        'lh.dll': 'apps/lh.dll',
+    }
+
+    @contextmanager
+    def fixture(self, overrides=None):
+        with tempfile.TemporaryDirectory() as temporary:
+            build, destination = Path(temporary) / 'build', Path(temporary) / 'package'
+            for source in [*self.layout, 'openhouse-check.exe', 'example_app.exe']:
+                path = build / source
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(b'openhouse-personal-lighthouse-only ' + source.encode())
+
+            def dumpbin(*command):
+                filename = Path(command[-1]).name
+                if command[1] == '/dependents':
+                    dependencies = (overrides or {}).get(filename, ['KERNEL32.dll'])
+                    if overrides is None and filename in {
+                        'lhtool.exe', 'lhviz.exe', 'openhouse-compare.exe'
+                    }:
+                        dependencies = ['KERNEL32.dll', 'lh.dll']
+                    return ''.join(f'    {name}\n' for name in dependencies)
+                if command[1] == '/imports':
+                    return '    KERNEL32.dll\n'
+                if command[1] == '/exports' and filename == 'driver_lighthouse.dll':
+                    return '    1    0 00012345 HmdDriverFactory\n'
+                raise AssertionError(command)
+
+            # PE structure checks have their own tests. Exercise copying and import policy here.
+            with mock.patch.object(packager, 'output', side_effect=dumpbin), \
+                    mock.patch.object(packager, 'require_x64'), \
+                    mock.patch.object(packager, 'require_system_dll_search'):
+                yield build, destination
+
+    def test_diagnostic_layout_and_matching_runtime_exclude_checker_and_example(self):
+        with self.fixture() as (build, destination):
+            records = packager.copy_artifacts(build, destination)
+            self.assertEqual({record['file'] for record in records}, set(self.layout.values()))
+            for source, target in self.layout.items():
+                self.assertEqual((build / source).read_bytes(), (destination / target).read_bytes())
+            for record in records:
+                self.assertEqual(record['sha256'],
+                                 hashlib.sha256((destination / record['file']).read_bytes()).hexdigest())
+
+    def test_missing_matching_runtime_blocks_packaging(self):
+        with self.fixture() as (build, destination):
+            (build / 'lh.dll').unlink()
+            with self.assertRaises(FileNotFoundError):
+                packager.copy_artifacts(build, destination)
+
+    def test_driver_and_runtime_library_remain_system_only(self):
+        for filename in ['driver_lighthouse.dll', 'lh.dll', 'openhouse-installer.exe']:
+            with self.subTest(filename=filename), self.fixture(
+                {filename: ['KERNEL32.dll', 'lh.dll']}
+            ) as (build, destination):
+                with self.assertRaises(ValueError):
+                    packager.copy_artifacts(build, destination)
+
+    def test_runtime_exception_does_not_allow_other_unbundled_libraries(self):
+        with self.fixture({'lhtool.exe': ['KERNEL32.dll', 'VCRUNTIME140.dll']}) as fixture:
+            with self.assertRaises(ValueError):
+                packager.copy_artifacts(*fixture)
 
 
 if __name__ == '__main__':

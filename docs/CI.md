@@ -49,17 +49,22 @@ by this workflow. Updating the lock or adding tools requires a separate review a
 ## Package checks
 
 Packaging refuses a dirty source tree or a source revision different from the workflow revision.
-It requires successful results for all 16 expected CTest targets, including personal safety,
-shutdown, runtime, OpenVR, and `zlib_compatibility`.
+It requires successful results for every target in the packager's `REQUIRED_TESTS` set,
+including personal safety, shutdown, installer actions and discovery, runtime, OpenVR,
+and `zlib_compatibility`.
 The zlib target checks version identity, exact-output raw-deflate completion,
 decompression, and CRC. Failed, skipped, or missing CTest targets block the package.
 Individual upstream GoogleTest cases can skip optional fixtures inside a passing target.
 
-The package must contain an x64 driver, installer, and viewer. Each binary must import only
-recognized Windows system DLLs. The driver must export only `HmdDriverFactory` and contain the
-personal-fork marker. Dependency license notices are required. Developer tools and OpenVR's
-client DLL are not included in the package. Only OpenVR's prebuilt client dependency uses dynamic
-linkage for the test probe; the shipped targets retain static compiler runtimes.
+The package requires an x64 driver, installer, viewer, `lhtool`, `lhcapture`, `lhviz`,
+`openhouse-compare`, and matching `lh.dll`. Tools and runtime are together in `apps/`.
+Only `lhtool`, `lhviz`, and `openhouse-compare` may import that bundled runtime DLL.
+Every other import must be a recognized Windows system DLL. The driver must export only
+`HmdDriverFactory` and contain the personal-fork marker. Dependency license notices are required.
+The checker, SDK example, firmware, and OpenVR client DLL are excluded. CI enables extra-app
+builds to produce the comparison tool but does not run or ship the checker or SDK example.
+Only OpenVR's prebuilt client dependency uses dynamic linkage for the test probe;
+the shipped targets retain static compiler runtimes.
 
 The package includes `BUILD.json`. Release assets also include the ZIP's SHA-256 checksum,
 a copy of `BUILD.json`, and the CTest XML report.

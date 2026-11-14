@@ -55,7 +55,8 @@ Run cmake @('-P', 'scripts/tests/check-zlib-overlay.cmake')
 Run cmake @('-S', '.', '-B', $build, '-G', 'Ninja', '-DCMAKE_BUILD_TYPE=Release',
     "-DCMAKE_TOOLCHAIN_FILE=$tools/scripts/buildsystems/vcpkg.cmake",
     "-DVCPKG_OVERLAY_TRIPLETS=$repo/cmake/triplets", "-DVCPKG_TARGET_TRIPLET=$triplet",
-    '-DVCPKG_MANIFEST_FEATURES=tests;viewer', '-DLH_BUILD_ORACLE_TESTS=OFF')
+    '-DVCPKG_MANIFEST_FEATURES=tests;viewer', '-DLH_BUILD_ORACLE_TESTS=OFF',
+    '-DLH_BUILD_EXTRA_APPS=ON')
 Run cmake @('--build', $build, '--parallel', '2', '--', '-k', '0')
 Run ctest @('--test-dir', $build, '--output-on-failure', '--timeout', '180',
     '--output-junit', "$build/ctest-results.xml")
@@ -85,7 +86,7 @@ Run cmake (@('-S', '.', '-B', "$repo/build-ci-usb-off", '-DLH_BUILD_USB=OFF',
 Run cmake @('--build', "$repo/build-ci-usb-off", '--target', 'lh', '--parallel', '2')
 $summary = @"
 ## Windows build passed
-- Driver, installer, viewer, and hardware-free CTest targets built and checked.
+- Driver, installer, viewer, diagnostic apps, and hardware-free CTest targets built and checked.
 - Package imports, driver exports, checksums, licenses, and source revision checked.
 - USB-off runtime built; installed Windows consumer linked and ran without starting USB.
 - Firmware numeric tests ran on the host; Linux/Apple dependency selection used stubs.
