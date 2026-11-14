@@ -48,7 +48,7 @@ void Arguments() {
 
 struct Fixture {
   lh::files::StagingDirectory temporary{fs::temp_directory_path()};
-  fs::path steamvr = temporary.Payload() / L"SteamVR with spaces";
+  fs::path steamvr = temporary.Payload() / L"SteamVR with spaces" / L".";
   fs::path target = steamvr / "drivers/lighthouse/bin/win64/driver_lighthouse.dll";
   fs::path backup = fs::path(target.wstring() + L".openhouse-personal-stock");
   fs::path package = temporary.Payload() / "package.dll";
@@ -83,13 +83,17 @@ void StatusAndCancellation() {
   CHECK(RunAction({Action::Install, files.steamvr}, files.package, prompts) ==
         L"Canceled. No driver files changed.");
   CHECK(files.confirmations == 1 && files.closes == 0);
-  CHECK(files.lastConfirmation.find(files.target.wstring()) != std::wstring::npos);
+  const auto expectedTarget = fs::canonical(files.steamvr) /
+                              "drivers/lighthouse/bin/win64/driver_lighthouse.dll";
+  CHECK(fs::equivalent(files.target, expectedTarget));
+  CHECK(files.lastConfirmation.find(expectedTarget.wstring()) != std::wstring::npos);
   CHECK(files.lastConfirmation.find(L"separate confirmation") != std::wstring::npos);
   CHECK(lh::files::Read(files.target) == files.stock && !fs::exists(files.backup));
   lh::files::AtomicWrite(files.backup, files.stock);
   CHECK(RunAction({Action::Restore, files.steamvr}, {}, prompts) ==
         L"Canceled. No driver files changed.");
   CHECK(files.confirmations == 2 && files.closes == 0);
+  CHECK(files.lastConfirmation.find(expectedTarget.wstring()) != std::wstring::npos);
   CHECK(lh::files::Read(files.target) == files.stock);
   CHECK(lh::files::Read(files.backup) == files.stock);
 }
