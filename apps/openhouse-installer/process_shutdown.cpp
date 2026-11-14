@@ -73,7 +73,7 @@ bool Process::Running() const {
   return state == WAIT_TIMEOUT;
 }
 
-fs::path RegisteredSteamDirectory() {
+fs::path RegisteredSteamPath() {
   HKEY key = nullptr;
   if (RegOpenKeyExW(HKEY_CURRENT_USER, L"Software\\Valve\\Steam", 0, KEY_READ, &key) != ERROR_SUCCESS)
     return {};
@@ -85,8 +85,14 @@ fs::path RegisteredSteamDirectory() {
   if (result != ERROR_SUCCESS || type != REG_SZ || size < sizeof(wchar_t) ||
       size > sizeof value || size % sizeof(wchar_t) || value[size / sizeof(wchar_t) - 1] != L'\0')
     return {};
+  return fs::path(value);
+}
+
+fs::path RegisteredSteamDirectory() {
+  const auto path = RegisteredSteamPath();
+  if (path.empty()) return {};
   std::error_code error;
-  const auto root = fs::canonical(value, error);
+  const auto root = fs::canonical(path, error);
   return error ? fs::path() : root;
 }
 

@@ -61,9 +61,21 @@ def main():
     run(compiler + ['tests/personal/test_shutdown.cpp'] + shutdown +
         ['-o', str(OUT / 'shutdown-tests.exe')], 'compile-shutdown')
     run([str(OUT / 'shutdown-tests.exe')], 'test-shutdown')
-    run(compiler + ['-municode', 'apps/openhouse-installer/main.cpp'] + shutdown +
+    actions = ['apps/openhouse-installer/installer_actions.cpp']
+    run(compiler + ['tests/personal/test_installer_actions.cpp'] + actions + shutdown +
+        ['-o', str(OUT / 'installer-actions.exe')], 'compile-installer-actions')
+    run([str(OUT / 'installer-actions.exe')], 'test-installer-actions')
+    discovery = ['apps/openhouse-installer/steam_metadata.cpp',
+                 'apps/openhouse-installer/steamvr_discovery.cpp']
+    run(compiler + ['tests/personal/test_steamvr_discovery.cpp'] + discovery + shutdown +
+        ['-o', str(OUT / 'installer-discovery.exe')], 'compile-installer-discovery')
+    run([str(OUT / 'installer-discovery.exe')], 'test-installer-discovery')
+    menu = ['apps/openhouse-installer/menu.cpp', 'apps/openhouse-installer/menu_dialogs.cpp',
+            '-lgdi32', '-lole32', '-luuid']
+    run(compiler + ['-municode', 'apps/openhouse-installer/main.cpp'] +
+        actions + discovery + menu + shutdown +
         ['-o', str(OUT / 'openhouse-installer.exe')], 'compile-installer')
-    run([str(OUT / 'openhouse-installer.exe')], 'installer-refuses-missing-arguments', 1)
+    run([str(OUT / 'openhouse-installer.exe'), '--unknown'], 'installer-refuses-unknown-option', 1)
     for name in ['scripts/check-personal.py', 'scripts/package-windows.py']:
         ast.parse((ROOT / name).read_text(encoding='utf-8'), filename=name)
     print('PASS: Python syntax')

@@ -41,7 +41,9 @@ and the distinction between local statistics and Internet telemetry.
 
 The personal Windows package contains only the driver, installer, viewer, documentation, and license notices.
 It does not include the update checker, comparison app, firmware, or standalone diagnostic tools.
-The upstream source for unrelated tools remains available for reference.
+The source for all eight applications is retained. Diagnostic targets also build by default;
+the additional updater, comparison app, and SDK example are available through an opt-in build.
+See [Application builds](docs/APPLICATIONS.md) for their roles and runtime boundaries.
 
 ## Safety boundaries
 
@@ -75,6 +77,10 @@ cmake --build build
 ctest --test-dir build --output-on-failure
 ```
 
+To include the updater, comparison app, and SDK example in the root build, add
+`-DLH_BUILD_EXTRA_APPS=ON`. Keep USB, tools, and viewers enabled to build all eight applications.
+This does not add executables to the Windows package or register an automatic updater.
+
 CMake can skip the driver or viewer if their dependencies are missing.
 A successful partial build is not a successful VR release build.
 Make sure that `driver_lighthouse`, `openhouse-installer`, and `openhouse-viewer` all build before packaging.
@@ -89,8 +95,10 @@ python scripts/check-personal.py
 
 This command compiles and runs file, installer-core, packet-boundary, local-network, and shutdown checks.
 Shutdown tests use hidden temporary fixture processes, not your real Steam or VR processes.
-It also compiles the installer and confirms that missing arguments cause a refusal.
-It does not run an install action or certify the full driver.
+It also checks installer action parsing, cancellation, and source validation before consent.
+Discovery tests use synthetic Steam metadata and temporary folders, not your actual Steam installation.
+It compiles the installer and confirms that an unknown option causes a refusal without opening the menu.
+It does not run the menu, perform an install action, or certify the full driver.
 
 The optional Linux-hosted Windows cross-build script requires an existing vcpkg checkout at
 `a5f736224e85b32e25a8ffc52562333180396642`, with its binary and source cache already provisioned.
@@ -99,8 +107,28 @@ No signing step or independent binary-to-source reproduction is provided.
 
 ## Installer interface after validation
 
-These commands document the source interface. They are not a recommendation to install this unvalidated branch.
+This section documents the current source interface, not a recommendation to install this unvalidated branch.
+Existing Preview 5 binaries do not include the menu and still require command-line flags.
+
+With the updated executable, double-click `openhouse-installer.exe` to open the Windows menu.
+The current source searches known local Steam locations when the menu opens.
+It reads Steam's registered path, standard Steam folders, and library metadata for other drives.
+It also checks `STEAMVR_PATH` when that environment variable is set.
+App 250820's manifest supplies the installation folder name, including nondefault names.
+It does not scan entire drives, query network libraries, or start Steam or SteamVR.
+
+One valid result fills the folder field. For multiple results, choose a folder from the list.
+Use **Find SteamVR** to retry, or choose **Browse** and select the folder manually.
+The selected folder must contain `bin/win64/vrserver.exe`.
+Discovery only selects a folder. It does not install anything or confirm an operation.
+Automatic search is included in the current local installer build.
+Earlier menu builds require manual selection.
+The menu offers **Install personal driver**, **Restore original driver**, and **Check installation**.
+Results and errors appear in the window. The menu does not install anything on startup.
+Install and restore operations require confirmation. Checking installation does not change driver files.
 Save your work and close VR games before an install or restore operation.
+
+The existing command-line interface remains available for scripts.
 Replace the example path with the SteamVR directory on your computer.
 
 ```text
@@ -115,6 +143,13 @@ The installer identifies SteamVR processes inside the selected SteamVR directory
 It also identifies Steam and its web helpers inside the Steam directory registered for your Windows account.
 It checks executable paths, Windows user identities, and the current Windows session, not process names alone.
 An unreadable process identity stops the operation. An unrelated process with the same name is not selected.
+
+The menu asks separately before requesting normal closure of verified processes.
+The window remains responsive during the wait, but another operation cannot start until the current one finishes.
+If processes remain open or restart, the menu stops before changing driver files.
+Close those applications manually and try again. The menu does not force-close applications.
+
+The command-line interface retains its explicit force-close fallback:
 
 1. Review the displayed process paths and IDs, then confirm the normal close request.
 2. Wait up to 15 seconds. The installer sends `WM_CLOSE` to each selected process's windows without moving focus.

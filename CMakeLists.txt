@@ -36,6 +36,7 @@ endif()
 option(LH_BUILD_USB "Build the optional hidapi transport" ON)
 option(LH_BUILD_TOOLS "Build lhtool (requires USB transport)" ON)
 option(LH_BUILD_VIEWER "Build GLFW/OpenGL diagnostic viewer if available" ON)
+option(LH_BUILD_EXTRA_APPS "Build optional updater, comparison app, and SDK example" OFF)
 option(LH_BUILD_TESTS "Build tests" ON)
 option(LH_BUILD_ORACLE_TESTS "Build tests that dlopen the original driver_lighthouse.so" ON)
 
@@ -154,9 +155,13 @@ if(LH_BUILD_USB)
     # The personal installer changes only the DLL and keeps its stock backup.
     if(WIN32)
       add_executable(openhouse-installer apps/openhouse-installer/main.cpp
+        apps/openhouse-installer/installer_actions.cpp
+        apps/openhouse-installer/menu.cpp apps/openhouse-installer/menu_dialogs.cpp
+        apps/openhouse-installer/steam_metadata.cpp apps/openhouse-installer/steamvr_discovery.cpp
         apps/openhouse-installer/process_shutdown.cpp)
       target_include_directories(openhouse-installer PRIVATE src)
-      target_link_libraries(openhouse-installer PRIVATE advapi32 user32)
+      target_link_libraries(openhouse-installer PRIVATE advapi32 user32 gdi32 ole32 uuid
+        Threads::Threads)
       if(NOT MSVC)  # MSVC starts wmain by itself
         target_compile_options(openhouse-installer PRIVATE -municode)
         target_link_options(openhouse-installer PRIVATE -municode)
@@ -301,6 +306,8 @@ if(LH_BUILD_VIEWER)
   endif()
 endif()
 
+include(cmake/apps/extra_apps.cmake)
+
 # ---- tests --------------------------------------------------------------------
 if(LH_BUILD_TESTS)
   enable_testing()
@@ -323,6 +330,18 @@ if(LH_BUILD_TESTS)
     target_include_directories(lh_shutdown_tests PRIVATE src apps/openhouse-installer)
     target_link_libraries(lh_shutdown_tests PRIVATE advapi32 user32)
     add_test(NAME personal_shutdown COMMAND lh_shutdown_tests)
+    add_executable(lh_installer_action_tests tests/personal/test_installer_actions.cpp
+      apps/openhouse-installer/installer_actions.cpp
+      apps/openhouse-installer/process_shutdown.cpp)
+    target_include_directories(lh_installer_action_tests PRIVATE src apps/openhouse-installer)
+    target_link_libraries(lh_installer_action_tests PRIVATE advapi32 user32)
+    add_test(NAME installer_actions COMMAND lh_installer_action_tests)
+    add_executable(lh_installer_discovery_tests tests/personal/test_steamvr_discovery.cpp
+      apps/openhouse-installer/steam_metadata.cpp apps/openhouse-installer/steamvr_discovery.cpp
+      apps/openhouse-installer/process_shutdown.cpp)
+    target_include_directories(lh_installer_discovery_tests PRIVATE src apps/openhouse-installer)
+    target_link_libraries(lh_installer_discovery_tests PRIVATE advapi32 user32)
+    add_test(NAME installer_discovery COMMAND lh_installer_discovery_tests)
   endif()
   add_executable(lh_zlib_compatibility_tests tests/personal/test_zlib_compatibility.cpp)
   target_link_libraries(lh_zlib_compatibility_tests PRIVATE ZLIB::ZLIB)
@@ -443,7 +462,10 @@ foreach(entry
     "lhcapture|openhouse device recorder"
     "openhouse-viewer|openhouse viewer"
     "lhviz|openhouse developer viewer"
-    "openhouse-installer|openhouse driver installer")
+    "openhouse-installer|openhouse driver installer"
+    "openhouse-check|openhouse update checker"
+    "openhouse-compare|openhouse stock-driver comparison"
+    "example_app|openhouse SDK example")
   string(REPLACE "|" ";" parts "${entry}")
   list(GET parts 0 name)
   list(GET parts 1 text)

@@ -31,6 +31,7 @@ struct Process {
   bool Running() const;
 };
 
+std::filesystem::path RegisteredSteamPath();
 std::filesystem::path RegisteredSteamDirectory();
 bool AllowedImage(const std::filesystem::path& image, const Scope& scope);
 std::vector<Process> FindHosts(const Scope& scope);

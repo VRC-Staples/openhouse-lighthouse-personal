@@ -23,7 +23,9 @@ SYSTEM_DLLS = {
     'shlwapi.dll', 'user32.dll', 'version.dll', 'winmm.dll', 'ws2_32.dll',
 }
 REQUIRED_TESTS = {
-    'personal_safety', 'personal_shutdown', 'firmware_numbers', 'unit', 'replay', 'openvr_components',
+    'personal_safety', 'personal_shutdown', 'installer_actions', 'installer_discovery',
+    'firmware_numbers',
+    'unit', 'replay', 'openvr_components',
     'openvr_driver', 'runtime', 'capture_help', 'capture_bad_duration', 'capture_no_overwrite',
     'viewer_math', 'viewer_dll_search', 'viewer_startup', 'replay_errors', 'zlib_compatibility',
     'viewer_connection', 'viewer_log', 'viewer_network',

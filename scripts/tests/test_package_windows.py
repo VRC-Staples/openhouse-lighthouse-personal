@@ -83,6 +83,19 @@ class PackageTests(unittest.TestCase):
                     with self.assertRaises(ValueError):
                         packager.require_tests(report)
 
+    def test_requires_installer_regressions(self):
+        installer_tests = {'installer_actions', 'installer_discovery'}
+        self.assertTrue(installer_tests <= packager.REQUIRED_TESTS)
+        with tempfile.TemporaryDirectory() as temporary:
+            report = Path(temporary) / 'tests.xml'
+            for missing in installer_tests:
+                with self.subTest(missing=missing):
+                    cases = ''.join(f'<testcase name="{name}"/>'
+                                    for name in packager.REQUIRED_TESTS - {missing})
+                    report.write_text(f'<testsuite>{cases}</testsuite>')
+                    with self.assertRaises(ValueError):
+                        packager.require_tests(report)
+
     def test_requires_all_test_targets_to_pass(self):
         cases = ''.join(f'<testcase name="{name}"/>' for name in packager.REQUIRED_TESTS)
         with tempfile.TemporaryDirectory() as temporary:

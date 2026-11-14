@@ -4,6 +4,54 @@ This record covers source changes based on upstream commit
 `befa16a206e6dc47777e81fc6e36a96fa08def9c`.
 The fork is experimental and is not ready for a recommended VR installation.
 
+## Automatic SteamVR discovery local build
+
+The source now searches known local Steam folders when the menu opens and when **Find SteamVR** is selected.
+It uses Steam's registered path, standard Program Files locations, `STEAMVR_PATH`, library metadata,
+and the SteamVR app manifest. It validates `bin/win64/vrserver.exe` before offering a result.
+A single result fills the folder field. Multiple results remain choices, not an automatic installation target.
+Manual entry and the folder picker remain available. Finding a folder does not install or close anything.
+
+The metadata parser limits file size, nesting, and collected library paths.
+Discovery uses fixed known filenames and local drive paths. It does not recursively scan disks or query network shares.
+The registry path reader is shared with shutdown code. Shutdown still canonicalizes that path as before.
+The new `installer_discovery` test source uses synthetic metadata and temporary folders.
+It does not call the default search that reads actual Steam settings.
+CMake, the existing check script, and the package gate include that regression target.
+
+The updated Windows x64 installer compiled with the existing MSVC 19.44.35224 toolchain,
+C++20, the static runtime, optimization, and `/W4`, without warnings or errors.
+The action and discovery regression executables compiled and passed using synthetic metadata and temporary folders.
+Seven Python package-gate tests passed. Executable inspection accepted the x64 image and Windows DLL imports.
+This was a standalone local build, not a full CMake, CTest, or locked release-package build.
+
+The installer itself was not launched. Actual Steam metadata and registry discovery, menu rendering,
+folder-list interaction, keyboard navigation, and worker progress remain unverified at runtime.
+The previous local menu build still requires manual folder selection.
+The earlier build evidence below predates automatic discovery and does not validate the new addition.
+
+## Installer menu local build before automatic discovery
+
+The source adds a Windows menu for no-argument launch and retains the command-line flags.
+Shared actions provide path validation, status, confirmation, and install or restore behavior.
+The menu requests normal closure only. It stops if verified processes remain open or restart.
+The command line retains its separate typed `FORCE` confirmation.
+
+A standalone Windows x64 installer build passed with the existing MSVC 19.44.35224 compiler,
+C++20, the static runtime, optimization, and `/W4`. The compiler reported no warnings or errors.
+The new `installer_actions` regression executable compiled and passed against temporary files.
+It covers parsing, status, cancellation, and preflight refusal without closing real Steam/VR processes.
+Executable inspection accepted the x64 image and its Windows system DLL imports.
+
+The installer itself was not launched. The native layout, folder picker, keyboard navigation,
+worker completion, and real application behavior remain unverified.
+This was a direct compiler build, not a full CMake or locked CI package build.
+The CMake target wiring and the full required CTest suite have not run for this addition.
+The package gate now requires `installer_actions`. No new preview package or CI run exists.
+Preview 5 and its Desktop extraction remain unchanged.
+
+The passed checks below predate the menu addition. They are not evidence of a new full-suite run.
+
 ## Checks that passed
 
 The hardware-free suite ran on Windows with the existing Zig 0.15.2 compiler.
@@ -20,7 +68,8 @@ The reproducible command is `python scripts/check-personal.py`.
 - Keep an uncooperative fixture running after canceled or non-explicit force-close responses.
 - Terminate a fixture only after the shutdown prompt receives `FORCE`. Keep an unrelated same-name fixture running.
 - Refuse a stale process creation time and an unreadable user identity. Verify executable-path boundaries.
-- Compile the Windows installer executable and confirm that missing arguments cause refusal. No installation command runs.
+- Compile the previous CLI-only Windows installer and confirm that missing arguments cause refusal. No installation command runs.
+  The current check uses an unknown option instead, because no arguments now select the menu.
 - Parse the changed Python scripts and run `git diff --check`.
 
 The DLL fixtures are inert byte strings. The tests never load them as code.
