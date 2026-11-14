@@ -405,7 +405,7 @@ if(LH_BUILD_TESTS)
       ${CMAKE_SOURCE_DIR}/tests/data/captures/session-20261016-142931Z-147083/input.lhraw 14)
   endif()
   add_executable(lh_runtime_tests tests/runtime/test_runtime.cpp tests/runtime/test_personal_profile.cpp
-    tests/runtime/test_review_runtime.cpp)
+    tests/runtime/test_review_runtime.cpp tests/runtime/test_ev2_head.cpp)
   target_include_directories(lh_runtime_tests PRIVATE src tests)
   target_compile_definitions(lh_runtime_tests PRIVATE LH_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
   if(LH_BUILD_USB)

@@ -16,6 +16,7 @@
 #include <string>
 #include <set>
 #include <thread>
+#include <unordered_map>
 #include <vector>
 
 #include "lh/input_sink.hpp"
@@ -154,6 +155,11 @@ class UsbTransport {
     std::string path;      // hidapi path, unique while plugged in
     bool bluetooth = false;  // receiver's radio in Bluetooth mode: no device can connect
     int keepalive = -1;  // last idle keepalive: 1 sent, 0 failed, -1 not attempted
+    // Check receiver identity after a disconnect or radio gap, without blocking the reader.
+    bool checkDevice = false;
+    bool checkPending = false;
+    double lastData = 0;
+    double checkUntil = 0, nextCheck = 0;
   };
   enum class OpenResult { Failed, Idle, Ready };
   // Opens and sets up one enumerated HID interface (Start and hotplug).
@@ -215,6 +221,17 @@ class UsbTransport {
   bool TakePairing(Open& o);
   // The stock keepalive to an idle receiver, once per probe pass.
   void KeepAlive(Open& o);
+  // Probe-thread identity result: 1 changed device, 0 same device, -1 no answer.
+  struct DeviceCheck {
+    std::string path, serial, receiver;
+    std::optional<int> result;
+  };
+  std::vector<std::shared_ptr<DeviceCheck>> deviceChecks_;  // under hapticMutex_
+  std::unordered_map<std::string, std::shared_ptr<DeviceCheck>> runningChecks_;  // reader only
+  void RunDeviceChecks();
+  bool CheckReceiverDevice(Open& o, double time, uint8_t id);
+  int OtherDeviceConnected(const std::string& path, const std::string& serial,
+                           const std::string& receiver);
   // A radio command for the thread that owns the receiver. set: the mode to switch to, or
   // nullopt to read it. result: the mode set or read, nullopt if that failed.
   struct RadioCommand {

@@ -36,6 +36,11 @@ void UsbTransport::Log(LogLevel level, const char* format, ...) {
 }
 namespace {
 
+// No wireless data for this long: a new radio epoch (the receiver may have missed the off notification).
+constexpr double kRadioGap = 1.0;  // s
+// #92: how long a receiver that doesn't say which device it has is asked again, and how often.
+constexpr double kDeviceCheck = 3.0, kDeviceRecheck = 0.25;  // s
+
 constexpr uint16_t kValveVid = 0x28de;
 
 double HostNow() {
@@ -133,7 +138,7 @@ void ReportDecoder::OnReport(double hostTime, uint16_t epId, bool last, const ui
     if (data[0] != 0x23 && data[0] != 0x24) return;
     // Some receivers miss the off notification. A radio data gap is an epoch
     // boundary: discard protocol substate, IMU dedup timestamps and clock fit.
-    if (ep.lastWirelessReport && hostTime - ep.lastWirelessReport > 1.0) ResetWireless(ep);
+    if (ep.lastWirelessReport && hostTime - ep.lastWirelessReport > kRadioGap) ResetWireless(ep);
     if (!ep.connected) {
       sink_->OnDeviceAttached(ep.info.serial, ep.info.configJson);
       ep.connected = true;
@@ -182,6 +187,85 @@ std::optional<uint32_t> UsbTransport::ConnectedSerial(hid_device_* receiver) {
   DeviceInfo di;
   if (!QueryDeviceInfo(receiver, &di, 2)) return std::nullopt;
   return di.serial;
+}
+
+// #92: whether the device on a receiver is no longer the one it was set up for. A dongle can be
+// paired with several devices and serves whichever is on (one at a time), staying plugged in; it was
+// identified only when opened, so a 3.0 tracker switched on in place of a 2018 one was taken for it,
+// with the 2018's sensor layout. Asked only after a disconnect or a radio gap (Run asks again while
+// the receiver doesn't answer). Runs on the probe thread, on a second handle to the receiver: the
+// reader thread's handle stays its own. 1: another device, 0: the same one, -1: no answer.
+int UsbTransport::OtherDeviceConnected(const std::string& path, const std::string& serial, const std::string& receiver) {
+  hid_device* h = nullptr;
+  {
+    static std::mutex openMutex;  // hid_open_path's error string is process-wide (#49.5)
+    std::lock_guard openLock(openMutex);
+    h = hid_open_path(path.c_str());
+  }
+  if (!h) return -1;
+  DeviceInfo di;
+  const bool ok = QueryDeviceInfo(h, &di, 2) && di.serial != 0;
+  hid_close(h);
+  if (!ok) return -1;
+  char sn[16];
+  snprintf(sn, sizeof sn, "LHR-%08X", di.serial);
+  if (serial == sn) return 0;
+  Log(LogLevel::Info, "%s: receiver %s now has %s; reopening it to set that device up\n", serial.c_str(), receiver.c_str(), sn);
+  return 1;
+}
+
+void UsbTransport::RunDeviceChecks() {
+  std::vector<std::shared_ptr<DeviceCheck>> checks;
+  {
+    std::lock_guard lock(hapticMutex_);
+    checks = deviceChecks_;
+  }
+  for (auto& c : checks) {
+    if (stop_) return;
+    const int result = OtherDeviceConnected(c->path, c->serial, c->receiver);
+    std::lock_guard lock(hapticMutex_);
+    c->result = result;
+    std::erase(deviceChecks_, c);
+  }
+}
+
+bool UsbTransport::CheckReceiverDevice(Open& o, double time, uint8_t id) {
+  if (o.info.kind != EndpointKind::Wireless) return false;
+  const bool data = id == 0x23 || id == 0x24;
+  if (id == 0x26 || (data && o.lastData > 0 && time - o.lastData > kRadioGap)) {
+    o.checkDevice = true;
+    o.checkUntil = time + kDeviceCheck;
+    o.nextCheck = 0;
+    // Answers from an earlier radio epoch must not select this device's configuration.
+    o.checkPending = false;
+    runningChecks_.erase(o.path);
+  }
+  if (o.checkPending) {
+    std::optional<int> other;
+    {
+      std::lock_guard lock(hapticMutex_);
+      other = runningChecks_.at(o.path)->result;
+    }
+    if (other) {
+      o.checkPending = false;
+      runningChecks_.erase(o.path);
+      if (*other >= 0 || time > o.checkUntil) o.checkDevice = false;
+      else o.nextCheck = time + kDeviceRecheck;
+      if (*other == 1) return true;
+    }
+  }
+  if (data && o.checkDevice && !o.checkPending && time >= o.nextCheck) {
+    auto check = std::make_shared<DeviceCheck>();
+    check->path = o.path;
+    check->serial = o.info.serial;
+    check->receiver = o.receiver;
+    runningChecks_[o.path] = check;
+    o.checkPending = true;
+    std::lock_guard lock(hapticMutex_);
+    deviceChecks_.push_back(check);
+  }
+  if (data) o.lastData = time;
+  return false;
 }
 
 bool UsbTransport::QueryDeviceInfo(hid_device_* dev, DeviceInfo* info, int attempts) {
@@ -623,6 +707,7 @@ void UsbTransport::ProbeMain() {
       TakeRadioCommands(o);
       TakePairing(o);
     }
+    RunDeviceChecks();
   };
   while (!stop_) {
     Enumerate(false);
@@ -658,6 +743,8 @@ void UsbTransport::Stop() {
   stop_ = true;
   if (probe_.joinable()) probe_.join();
   if (thread_.joinable()) thread_.join();
+  deviceChecks_.clear();
+  runningChecks_.clear();
   for (auto& o : idle_) hid_close(o.dev);
   idle_.clear();
   for (auto& o : pending_) hid_close(o.dev);
@@ -791,6 +878,10 @@ void UsbTransport::Run() {
       }
       for (int i = 0; i < count; i++) {
         const bool last = i == count - 1;
+        if (CheckReceiverDevice(o, reps[i].t, reps[i].buf[0])) {
+          o.disconnected = true;
+          break;
+        }
         capture_.WriteReport(reps[i].t, o.info.ep, last, reps[i].buf, size_t(reps[i].n));
         ProcessReport(o, reps[i].t, last, reps[i].buf, size_t(reps[i].n));
       }
@@ -804,6 +895,7 @@ void UsbTransport::Run() {
       if (!it->receiver.empty()) DropReceiver(it->receiver);
       hid_close(it->dev);
       decoder_.RemoveEndpoint(it->info.ep);
+      runningChecks_.erase(it->path);
       {
         std::lock_guard lock(pathsMutex_);
         paths_.erase(it->path);

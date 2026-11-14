@@ -7,6 +7,7 @@
 // problem, which is exactly what it is for.
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <cmath>
 
 #include "tracking/direct_filter.hpp"
@@ -171,6 +172,34 @@ TEST(RejectDiagnostics, RefusalUnitsMatchTheLimitTheyWereComparedWith) {
   const auto omega = RejectUnitsFor(lh::direct::kRejectOmega);
   EXPECT_DOUBLE_EQ(omega.scale, 1.0);
   EXPECT_STREQ(omega.unit, "rad/s");
+}
+
+TEST(VibrationCalibration, HoldsImuCalibrationWithoutFreezingPoseOrBaseTilt) {
+  using namespace lh::direct;
+  for (const bool held : {false, true}) {
+    SCOPED_TRACE(held);
+    DirectFilter filter;
+    filter.DefaultState();
+    std::copy_n(filter.x, kStateSize, filter.xLin);
+    filter.Ppred = Mat::Identity(filter.n, filter.n);
+    filter.holdImuCalibration = held;
+    const double gravity = filter.x[18];
+    Residual observation;
+    observation.m = 3;
+    observation.eval = [](const double* x, double* out) {
+      out[0] = x[0]; out[1] = x[16]; out[2] = x[18];
+    };
+    observation.evalJet = [](const Jet* x, Jet* out) {
+      out[0] = x[0]; out[1] = x[16]; out[2] = x[18];
+    };
+    Vec measured(3);
+    measured << filter.xLin[0] + 0.01, filter.xLin[16] + 0.01, gravity + 0.01;
+    ASSERT_TRUE(filter.Update({observation}, 0.01 * Mat::Identity(3, 3), measured));
+    EXPECT_GT(filter.x[0], filter.xLin[0]);
+    EXPECT_GT(filter.x[16], filter.xLin[16]);
+    if (held) EXPECT_DOUBLE_EQ(filter.x[18], gravity);
+    else EXPECT_GT(filter.x[18], gravity);
+  }
 }
 
 }  // namespace

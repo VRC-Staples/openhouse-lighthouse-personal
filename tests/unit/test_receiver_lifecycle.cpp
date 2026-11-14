@@ -59,6 +59,74 @@ struct UsbTransportTestAccess {
     EXPECT_EQ(transport.pairing_[1].milliseconds, 5000);
   }
 
+  static void CheckChangedDeviceReply() {
+    InputSinkBase sink;
+    UsbTransport transport(&sink, UsbTransportOptions{"unused-test-config"});
+    UsbTransport::Open endpoint;
+    endpoint.info.kind = EndpointKind::Wireless;
+    endpoint.path = "synthetic-receiver-path";
+    endpoint.lastData = 1.0;
+    EXPECT_FALSE(transport.CheckReceiverDevice(endpoint, 2.1, 0x23));
+    ASSERT_TRUE(endpoint.checkPending);
+    ASSERT_EQ(transport.deviceChecks_.size(), 1u);
+    transport.runningChecks_.at(endpoint.path)->result = 1;
+    EXPECT_TRUE(transport.CheckReceiverDevice(endpoint, 2.2, 0x23));
+    EXPECT_FALSE(endpoint.checkPending);
+    EXPECT_TRUE(transport.runningChecks_.empty());
+  }
+
+  static void CheckIdentityRetry() {
+    InputSinkBase sink;
+    UsbTransport transport(&sink, UsbTransportOptions{"unused-test-config"});
+    UsbTransport::Open endpoint;
+    endpoint.info.kind = EndpointKind::Wireless;
+    endpoint.path = "synthetic-receiver-path";
+    EXPECT_FALSE(transport.CheckReceiverDevice(endpoint, 1.0, 0x26));
+    EXPECT_FALSE(transport.CheckReceiverDevice(endpoint, 1.1, 0x23));
+    transport.runningChecks_.at(endpoint.path)->result = -1;
+    EXPECT_FALSE(transport.CheckReceiverDevice(endpoint, 1.2, 0x23));
+    EXPECT_FALSE(endpoint.checkPending);
+    EXPECT_FALSE(transport.CheckReceiverDevice(endpoint, 1.3, 0x23));
+    EXPECT_FALSE(endpoint.checkPending);
+    EXPECT_FALSE(transport.CheckReceiverDevice(endpoint, 1.5, 0x23));
+    ASSERT_TRUE(endpoint.checkPending);
+    transport.runningChecks_.at(endpoint.path)->result = 0;
+    EXPECT_FALSE(transport.CheckReceiverDevice(endpoint, 1.6, 0x23));
+    EXPECT_FALSE(endpoint.checkDevice);
+  }
+
+  static void CheckOldEpochReplyIsIgnored() {
+    InputSinkBase sink;
+    UsbTransport transport(&sink, UsbTransportOptions{"unused-test-config"});
+    UsbTransport::Open endpoint;
+    endpoint.info.kind = EndpointKind::Wireless;
+    endpoint.path = "synthetic-receiver-path";
+    EXPECT_FALSE(transport.CheckReceiverDevice(endpoint, 1.0, 0x26));
+    EXPECT_FALSE(transport.CheckReceiverDevice(endpoint, 1.1, 0x23));
+    auto oldCheck = transport.runningChecks_.at(endpoint.path);
+    oldCheck->result = 1;
+    EXPECT_FALSE(transport.CheckReceiverDevice(endpoint, 1.2, 0x26));
+    EXPECT_FALSE(transport.CheckReceiverDevice(endpoint, 1.3, 0x23));
+    auto newCheck = transport.runningChecks_.at(endpoint.path);
+    EXPECT_NE(oldCheck, newCheck);
+    newCheck->result = 0;
+    EXPECT_FALSE(transport.CheckReceiverDevice(endpoint, 1.4, 0x23));
+    EXPECT_FALSE(endpoint.checkDevice);
+  }
+
+  static void CheckStopReleasesPendingIdentityChecks() {
+    InputSinkBase sink;
+    UsbTransport transport(&sink, UsbTransportOptions{"unused-test-config"});
+    auto check = std::make_shared<UsbTransport::DeviceCheck>();
+    check->path = "synthetic-receiver-path";
+    const std::weak_ptr<UsbTransport::DeviceCheck> lifetime = check;
+    transport.deviceChecks_.push_back(check);
+    transport.runningChecks_[check->path] = check;
+    check.reset();
+    transport.Stop();
+    EXPECT_TRUE(lifetime.expired());
+  }
+
   static void CheckPairingBoundsAndUnknownReceiver() {
     InputSinkBase sink;
     UsbTransport transport(&sink, UsbTransportOptions{"unused-test-config"});
@@ -88,4 +156,20 @@ TEST(ReceiverLifecycle, LatestPairingCommandReplacesOnlyThatReceiversPendingComm
 
 TEST(ReceiverLifecycle, PairingBoundsAndUnknownReceiversPreserveTheQueue) {
   lh::usb::UsbTransportTestAccess::CheckPairingBoundsAndUnknownReceiver();
+}
+
+TEST(ReceiverLifecycle, StopReleasesPendingIdentityChecksBeforeRestart) {
+  lh::usb::UsbTransportTestAccess::CheckStopReleasesPendingIdentityChecks();
+}
+
+TEST(ReceiverLifecycle, ChangedIdentityReplyRequestsReopenWithoutRunningTheProbe) {
+  lh::usb::UsbTransportTestAccess::CheckChangedDeviceReply();
+}
+
+TEST(ReceiverLifecycle, UnknownIdentityRepliesRetryAndASameDeviceReplyFinishesTheCheck) {
+  lh::usb::UsbTransportTestAccess::CheckIdentityRetry();
+}
+
+TEST(ReceiverLifecycle, NewRadioEpochDiscardsAnOldChangedDeviceReply) {
+  lh::usb::UsbTransportTestAccess::CheckOldEpochReplyIsIgnored();
 }
